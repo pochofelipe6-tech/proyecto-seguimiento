@@ -22157,7 +22157,6 @@
   var channel;
   var lastSent = 0;
   var lastAlarm = 0;
-  var lastAlertRefresh = 0;
   var refreshTimer;
   var audioContext;
   var adminTrips = [];
@@ -22242,11 +22241,6 @@
     try {
       const result = failure(await supabase.rpc("record_position", { p_trip_id: activeTrip.id, p_lat: latitude, p_lng: longitude, p_speed: kmh, p_accuracy: accuracy || null }));
       if (result == null ? void 0 : result[0]) $("distanceValue").textContent = Number(result[0].total_km).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      if (kmh > activeTrip.speed_limit && Date.now() - lastAlertRefresh > 1e4) {
-        lastAlertRefresh = Date.now();
-        loadDriverAlerts().catch(() => {
-        });
-      }
       message("driverMessage", "Ubicaci\xF3n enviada al centro de control.");
     } catch (err) {
       message("driverMessage", "No se pudo enviar la ubicaci\xF3n: ".concat(err.message), true);
@@ -22283,7 +22277,6 @@
     for (const element of $("tripForm").querySelectorAll("input,select")) element.disabled = running;
     if (running) {
       $("limitValue").textContent = activeTrip.speed_limit;
-      $("sector").value = activeTrip.sector;
       $("distanceValue").textContent = Number(activeTrip.distance_km || 0).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     } else {
       $("speedValue").textContent = "0";
@@ -22295,7 +22288,6 @@
   $("startButton").textContent = "Iniciar seguimiento";
   $("driverVehicle").closest("label").insertAdjacentHTML("afterend", '<button id="showVehicleForm" type="button" class="secondary vehicle-add-button">Agregar veh\xEDculo</button>');
   $("tripForm").insertAdjacentHTML("afterend", '\n  <section id="driverVehiclePanel" class="vehicle-registration" hidden>\n    <h2>Agregar veh\xEDculo a la ruta</h2>\n    <form id="driverVehicleForm">\n      <div class="vehicle-form-grid">\n        <label>Nombre del conductor<input id="vehicleDriverNameInput" type="text" maxlength="100" autocomplete="name" required></label>\n        <label>Placa del veh\xEDculo<input id="vehiclePlateNew" type="text" maxlength="8" placeholder="ABC123" required></label>\n      </div>\n      <button type="submit">Guardar veh\xEDculo</button>\n      <p id="driverVehicleMessage" class="message" role="status"></p>\n    </form>\n    <h2>Veh\xEDculos registrados</h2>\n    <div class="table-scroll"><table><thead><tr><th>Conductor</th><th>Placa</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>\n  </section>');
-  $("driverView").insertAdjacentHTML("beforeend", '<section class="panel table-panel"><div class="panel-heading"><h2>Mis alertas de velocidad</h2><span id="driverAlertCount">0 eventos</span></div><div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Placa</th><th>Sector</th><th>Zona</th><th>Velocidad m\xE1xima</th><th>L\xEDmite</th></tr></thead><tbody id="driverAlertRows"><tr><td colspan="6">A\xFAn no hay alertas.</td></tr></tbody></table></div></section>');
   async function loadDriverVehicleTable() {
     const rows = failure(await supabase.from("vehicles").select("id,plate").eq("driver_id", user.id).order("plate"));
     $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => "<tr><td>".concat(clean(profile.full_name || "\u2014"), "</td><td>").concat(clean(v.plate), "</td></tr>")).join("") : '<tr><td colspan="2">A\xFAn no hay veh\xEDculos registrados.</td></tr>';
@@ -22340,32 +22332,18 @@
     const trips = failure(tripResult);
     activeTrip = trips[0] || null;
     renderTrip();
-    await loadDriverAlerts().catch((err) => message("driverMessage", "No se pudieron cargar las alertas: ".concat(err.message), true));
     if (activeTrip) {
       $("driverVehicle").value = activeTrip.vehicle_id;
       await startTracking().catch(() => {
       });
     }
   }
-  async function loadDriverAlerts() {
-    const result = await supabase.from("speed_alerts").select("trip_id,occurred_at,sector,zone,peak_speed_kmh,limit_kmh", { count: "exact" }).order("occurred_at", { ascending: false }).limit(50);
-    const events = failure(result);
-    $("driverAlertCount").textContent = "".concat(result.count || 0, " evento").concat(result.count === 1 ? "" : "s", " \xB7 \xFAltimos 50");
-    if (!events.length) {
-      $("driverAlertRows").innerHTML = '<tr><td colspan="6">A\xFAn no hay alertas.</td></tr>';
-      return;
-    }
-    const trips = failure(await supabase.from("trips").select("id,vehicle_id").in("id", [...new Set(events.map((a) => a.trip_id))]));
-    const tripVehicles = Object.fromEntries(trips.map((t) => [t.id, t.vehicle_id]));
-    const vehicles = failure(await supabase.from("vehicles").select("id,plate").in("id", [...new Set(trips.map((t) => t.vehicle_id))]));
-    const plates = Object.fromEntries(vehicles.map((v) => [v.id, v.plate]));
-    $("driverAlertRows").innerHTML = events.length ? events.map((a) => "<tr><td>".concat(date(a.occurred_at), "</td><td>").concat(clean(plates[tripVehicles[a.trip_id]] || "\u2014"), "</td><td>").concat(clean(a.sector), "</td><td>").concat(clean(zoneNames[a.zone] || a.zone), "</td><td>").concat(Math.round(a.peak_speed_kmh), " km/h</td><td>").concat(a.limit_kmh, " km/h</td></tr>")).join("") : '<tr><td colspan="6">A\xFAn no hay alertas.</td></tr>';
-  }
   $("tripForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     if (activeTrip) return;
-    const vehicleId = $("driverVehicle").value, sector = $("sector").value.trim();
+    const vehicleId = $("driverVehicle").value;
     const zone = document.querySelector('input[name="zone"]:checked').value;
+    const sector = zoneNames[zone];
     if (!vehicleId) return message("driverMessage", "A\xFAn no tienes un veh\xEDculo asignado.", true);
     try {
       if (native.isNative) {
@@ -22375,7 +22353,6 @@
       activeTrip = failure(await supabase.rpc("start_trip", { p_vehicle_id: vehicleId, p_sector: sector, p_zone: zone }));
       renderTrip();
       await startTracking();
-      await loadDriverAlerts();
     } catch (err) {
       message("driverMessage", err.message, true);
     }
@@ -22387,7 +22364,6 @@
       stopTracking();
       activeTrip = null;
       renderTrip();
-      await loadDriverAlerts();
       message("driverMessage", "Ruta finalizada.");
     } catch (err) {
       message("driverMessage", err.message, true);

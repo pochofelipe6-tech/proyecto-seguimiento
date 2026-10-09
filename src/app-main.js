@@ -20,7 +20,7 @@ async function requireCedulaOnlyAuth() {
   }
 }
 let user, profile, activeTrip, watchId, watchKind, map, mapLayer, routeLayer, channel;
-let lastSent = 0, lastAlarm = 0, lastAlertRefresh = 0, refreshTimer, audioContext;
+let lastSent = 0, lastAlarm = 0, refreshTimer, audioContext;
 let adminTrips = [], adminVehicles = [], adminProfiles = [], adminAlerts = [];
 let registrationReady = false;
 
@@ -80,9 +80,6 @@ async function onPosition(position, error) {
   try {
     const result = failure(await supabase.rpc("record_position", { p_trip_id: activeTrip.id, p_lat: latitude, p_lng: longitude, p_speed: kmh, p_accuracy: accuracy || null }));
     if (result?.[0]) $("distanceValue").textContent = Number(result[0].total_km).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    if (kmh > activeTrip.speed_limit && Date.now() - lastAlertRefresh > 10000) {
-      lastAlertRefresh = Date.now(); loadDriverAlerts().catch(() => {});
-    }
     message("driverMessage", "Ubicación enviada al centro de control.");
   } catch (err) { message("driverMessage", `No se pudo enviar la ubicación: ${err.message}`, true); }
 }
@@ -109,7 +106,7 @@ function renderTrip() {
   $("driverStatus").classList.toggle("active", running);
   $("startButton").hidden = running; $("stopButton").hidden = !running;
   for (const element of $("tripForm").querySelectorAll("input,select")) element.disabled = running;
-  if (running) { $("limitValue").textContent = activeTrip.speed_limit; $("sector").value = activeTrip.sector; $("distanceValue").textContent = Number(activeTrip.distance_km || 0).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  if (running) { $("limitValue").textContent = activeTrip.speed_limit; $("distanceValue").textContent = Number(activeTrip.distance_km || 0).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   else { $("speedValue").textContent = "0"; $("distanceValue").textContent = "0,00"; $("speedState").textContent = "Esperando ruta"; $("alertBanner").hidden = true; }
 }
 $("startButton").textContent = "Iniciar seguimiento";
@@ -128,7 +125,6 @@ $("tripForm").insertAdjacentHTML("afterend", `
     <h2>Vehículos registrados</h2>
     <div class="table-scroll"><table><thead><tr><th>Conductor</th><th>Placa</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>
   </section>`);
-$("driverView").insertAdjacentHTML("beforeend", '<section class="panel table-panel"><div class="panel-heading"><h2>Mis alertas de velocidad</h2><span id="driverAlertCount">0 eventos</span></div><div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Placa</th><th>Sector</th><th>Zona</th><th>Velocidad máxima</th><th>Límite</th></tr></thead><tbody id="driverAlertRows"><tr><td colspan="6">Aún no hay alertas.</td></tr></tbody></table></div></section>');
 async function loadDriverVehicleTable() {
   const rows = failure(await supabase.from("vehicles").select("id,plate").eq("driver_id", user.id).order("plate"));
   $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => `<tr><td>${clean(profile.full_name || "—")}</td><td>${clean(v.plate)}</td></tr>`).join("") : '<tr><td colspan="2">Aún no hay vehículos registrados.</td></tr>';
@@ -168,27 +164,13 @@ async function loadDriver() {
   }
   const trips = failure(tripResult);
   activeTrip = trips[0] || null; renderTrip();
-  await loadDriverAlerts().catch((err) => message("driverMessage", `No se pudieron cargar las alertas: ${err.message}`, true));
   if (activeTrip) { $("driverVehicle").value = activeTrip.vehicle_id; await startTracking().catch(() => {}); }
-}
-async function loadDriverAlerts() {
-  const result = await supabase.from("speed_alerts").select("trip_id,occurred_at,sector,zone,peak_speed_kmh,limit_kmh", { count: "exact" }).order("occurred_at", { ascending: false }).limit(50);
-  const events = failure(result);
-  $("driverAlertCount").textContent = `${result.count || 0} evento${result.count === 1 ? "" : "s"} · últimos 50`;
-  if (!events.length) {
-    $("driverAlertRows").innerHTML = '<tr><td colspan="6">Aún no hay alertas.</td></tr>';
-    return;
-  }
-  const trips = failure(await supabase.from("trips").select("id,vehicle_id").in("id", [...new Set(events.map((a) => a.trip_id))]));
-  const tripVehicles = Object.fromEntries(trips.map((t) => [t.id, t.vehicle_id]));
-  const vehicles = failure(await supabase.from("vehicles").select("id,plate").in("id", [...new Set(trips.map((t) => t.vehicle_id))]));
-  const plates = Object.fromEntries(vehicles.map((v) => [v.id, v.plate]));
-  $("driverAlertRows").innerHTML = events.length ? events.map((a) => `<tr><td>${date(a.occurred_at)}</td><td>${clean(plates[tripVehicles[a.trip_id]] || "—")}</td><td>${clean(a.sector)}</td><td>${clean(zoneNames[a.zone] || a.zone)}</td><td>${Math.round(a.peak_speed_kmh)} km/h</td><td>${a.limit_kmh} km/h</td></tr>`).join("") : '<tr><td colspan="6">Aún no hay alertas.</td></tr>';
 }
 $("tripForm").addEventListener("submit", async (event) => {
   event.preventDefault(); if (activeTrip) return;
-  const vehicleId = $("driverVehicle").value, sector = $("sector").value.trim();
+  const vehicleId = $("driverVehicle").value;
   const zone = document.querySelector('input[name="zone"]:checked').value;
+  const sector = zoneNames[zone];
   if (!vehicleId) return message("driverMessage", "Aún no tienes un vehículo asignado.", true);
   try {
     // Solicitar GPS antes de crear la ruta evita una ruta activa sin consentimiento.
@@ -196,12 +178,12 @@ $("tripForm").addEventListener("submit", async (event) => {
       const p = await native.requestPermissions(); if (p.location !== "granted") throw new Error("Debes permitir la ubicación.");
     } else await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 20000 }));
     activeTrip = failure(await supabase.rpc("start_trip", { p_vehicle_id: vehicleId, p_sector: sector, p_zone: zone }));
-    renderTrip(); await startTracking(); await loadDriverAlerts();
+    renderTrip(); await startTracking();
   } catch (err) { message("driverMessage", err.message, true); }
 });
 $("stopButton").addEventListener("click", async () => {
   if (!activeTrip) return;
-  try { failure(await supabase.rpc("finish_trip", { p_trip_id: activeTrip.id })); stopTracking(); activeTrip = null; renderTrip(); await loadDriverAlerts(); message("driverMessage", "Ruta finalizada."); }
+  try { failure(await supabase.rpc("finish_trip", { p_trip_id: activeTrip.id })); stopTracking(); activeTrip = null; renderTrip(); message("driverMessage", "Ruta finalizada."); }
   catch (err) { message("driverMessage", err.message, true); }
 });
 document.querySelectorAll('input[name="zone"]').forEach((input) => input.addEventListener("change", () => { if (!activeTrip) $("limitValue").textContent = limits[input.value]; }));

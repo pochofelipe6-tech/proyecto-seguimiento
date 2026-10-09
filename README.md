@@ -12,7 +12,7 @@ Aplicación Android (Capacitor) con cuentas de usuario y una cuenta de administr
 
 1. Crea un proyecto Supabase y ejecuta [schema.sql](supabase/schema.sql) en SQL Editor.
 2. Cada persona puede crear su cuenta desde la app con nombre, cédula y contraseña. Internamente recibe el perfil `driver`, sin elegir rol.
-3. En SQL Editor, cambia el rol del administrador: `update public.profiles set role = 'admin' where id = '<UUID_DEL_USUARIO_ADMIN>';`. El UUID está en Authentication > Users.
+3. En Authentication > Users, crea o confirma la cuenta de administrador con un correo y una contraseña elegida por ti. Después ejecuta [crear_admin.sql](supabase/crear_admin.sql) en SQL Editor; cambia `admin@gmail.com` en el archivo si usaste otro correo. El script inserta o actualiza el perfil como `admin` sin tocar las tablas internas de Supabase Auth. En el campo de acceso «Cédula» de la app puedes escribir ese correo. La contraseña no se puede leer de la base de datos ni está incluida en el repositorio.
 4. Copia **Project URL** y la clave **publishable** en `.env.local`. Nunca uses la clave `service_role` dentro de la app.
 5. Ejecuta `npm install` y `npm run android:apk`. La salida está en `Ruta-Segura.apk`. Para web, ejecuta `npm run build:web` y sirve `dist/` con HTTPS para acceder al GPS.
 
@@ -30,7 +30,7 @@ Cada usuario puede pulsar **Agregar vehículo** junto al selector. El formulario
 
 La migración 008 convierte los antiguos valores `assistant` y `route_manager` a `driver` sin borrar usuarios, nombres, cédulas ni rutas. La distinción de conductor, responsable y auxiliar sigue en los campos del vehículo, no en el registro de cuenta.
 
-Al iniciar sesión, todo usuario común entra en **Mi recorrido**. Puede iniciar el seguimiento de un vehículo al que esté vinculado, conceder ubicación y ver sus alertas de exceso de velocidad con contador total, fecha, hora, placa, sector, zona, velocidad máxima y límite. Las zonas usan los límites preventivos SST: urbana 50, vía nacional 70, curvas 35 y escolar/residencial 30 km/h. La app emite pitido y, cuando el dispositivo lo permite, vibración o notificación por exceso. Solo una persona asignada puede enviar el GPS de un vehículo a la vez. La app debe permanecer abierta durante la ruta.
+Al iniciar sesión, todo usuario común entra en **Mi recorrido**. Puede iniciar el seguimiento de un vehículo al que esté vinculado y conceder ubicación. Ya no se pide «Sector o tramo»: se guarda automáticamente el nombre de la zona elegida como sector; no identifica una calle exacta. Las zonas usan los límites preventivos SST: urbana 50, vía nacional 70, curvas 35 y escolar/residencial 30 km/h. La app emite pitido y, cuando el dispositivo lo permite, vibración o notificación por exceso. El historial con fecha, hora, placa, conductor, sector/zona, velocidad máxima y límite se muestra solo en **Administración**. Solo una persona asignada puede enviar el GPS de un vehículo a la vez. La app debe permanecer abierta durante la ruta.
 
 Las tablas tienen políticas RLS: el administrador puede ver la flota, y cada usuario solo las rutas y vehículos que le corresponden. Las escrituras de posiciones y alertas se hacen por funciones SQL que validan a la persona autenticada que inició el seguimiento. El mapa se actualiza con Supabase Realtime y tiene un botón de actualización manual.
 
