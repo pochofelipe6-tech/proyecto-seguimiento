@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build:web": "esbuild src/app-entry.js --bundle --outfile=dist/app.js --format=iife --platform=browser --target=chrome60 --loader:.png=dataurl",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "build:web": "node scripts/build-web.mjs",
     "android:sync": "npm run build:web && cap sync android",
     "android:apk": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-apk.ps1"
   },
@@ -14,7 +17,10 @@
     "@capacitor/haptics": "7.0.5",
     "@capacitor/local-notifications": "7.0.7",
     "@supabase/supabase-js": "^2.90.1",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "next": "^16.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@capacitor/cli": "7.6.9",

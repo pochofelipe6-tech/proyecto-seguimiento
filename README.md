@@ -1,5 +1,11 @@
 # Ruta Segura SST
 
+## Aplicación web con Next.js
+
+La versión web usa Next.js App Router. Copia `.env.example` a `.env.local` y coloca `SUPABASE_URL` y `SUPABASE_ANON_KEY` reales de tu proyecto. En este entorno `.env.local` ya existe y la app lee esos valores directamente. El archivo está excluido de Git. Las variables privadas (`SUPABASE_SECRET_KEY`, VAPID y otras) no se envían al navegador. La compilación del APK toma de ese archivo **solo** la URL y la clave pública; debes volver a ejecutar `npm run android:apk` después de configurar Supabase.
+
+Ejecuta `npm install`, `npm run dev` y abre `http://localhost:3000`. Para producción, usa `npm run build` y `npm run start`. El proyecto Android/Capacitor y su compilación con `npm run android:apk` continúan disponibles por separado.
+
 Aplicación Android (Capacitor) con dos roles: conductor y administrador. Usa Supabase para autenticación, registro de rutas y alertas, y Leaflet/OpenStreetMap para el mapa.
 
 ## Configurar Supabase
