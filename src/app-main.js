@@ -248,23 +248,12 @@ async function refreshAdmin() {
       message("registrationMessage", "");
     }
     adminTrips = failure(trips); adminVehicles = failure(vehicles); adminProfiles = profileData; adminAlerts = failure(alerts);
-    $("vehicleDriver").innerHTML = '<option value="">Selecciona un conductor</option>' + adminProfiles.filter((p) => p.role === "driver").map((p) => `<option value="${p.id}">${clean(p.full_name || p.id)}</option>`).join("");
     renderAdmin(); message("adminMessage", "");
   } catch (err) { message("adminMessage", `Error al actualizar: ${err.message}`, true); }
 }
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refreshAdmin, 800); }
 $("refreshButton").addEventListener("click", refreshAdmin);
 $("registrationPanel").querySelector("thead tr").innerHTML = "<th>Nombre</th><th>Cédula</th>";
-$("vehicleForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  try {
-    const plate = $("vehiclePlate").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!/^[A-Z0-9]{5,8}$/.test(plate)) throw new Error("La placa debe tener entre 5 y 8 letras o números.");
-    failure(await supabase.from("vehicles").insert({ plate, label: $("vehicleLabel").value.trim(), driver_id: $("vehicleDriver").value }));
-    $("vehicleForm").reset(); message("vehicleMessage", "Vehículo guardado."); await refreshAdmin();
-  } catch (err) { message("vehicleMessage", err.message, true); }
-});
-
 $("registrationForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (profile?.role !== "admin") return message("registrationMessage", "Solo un administrador puede registrar usuarios.", true);
