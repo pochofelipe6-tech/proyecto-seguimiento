@@ -16,9 +16,9 @@ let adminTrips = [], adminVehicles = [], adminProfiles = [], adminAlerts = [];
 let registrationReady = false;
 
 function show(view) {
-  for (const id of ["setupView", "loginView", "driverView", "adminView"]) $(id).hidden = id !== view;
+  for (const id of ["setupView", "loginView", "signupView", "driverView", "adminView"]) $(id).hidden = id !== view;
   $("registrationPanel").hidden = view !== "adminView";
-  $("sessionBar").hidden = view === "loginView" || view === "setupView";
+  $("sessionBar").hidden = view === "loginView" || view === "signupView" || view === "setupView";
 }
 function message(id, text, error = false) { $(id).textContent = text; $(id).classList.toggle("error", error); }
 function clean(value) { return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
@@ -257,6 +257,31 @@ $("loginForm").addEventListener("submit", async (event) => {
   const { error } = await supabase.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
   if (error) return message("loginError", error.message, true);
   message("loginError", ""); await loadSession();
+});
+$("showSignup").addEventListener("click", () => { message("signupMessage", ""); show("signupView"); });
+$("backToLogin").addEventListener("click", () => show("loginView"));
+$("signupForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("signupName").value.trim();
+  const cedula = $("signupCedula").value.trim();
+  const email = $("signupEmail").value.trim().toLowerCase();
+  const password = $("signupPassword").value;
+  if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
+    return message("signupMessage", "Revisa el nombre, la cédula y la contraseña (mínimo 8 caracteres).", true);
+  }
+  const button = $("signupForm").querySelector('button[type="submit"]');
+  button.disabled = true; message("signupMessage", "Creando cuenta...");
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email, password, options: { data: { full_name: name, cedula } },
+    });
+    if (error) throw error;
+    if (!data.user || data.user.identities?.length === 0) throw new Error("No se pudo confirmar el registro. Revisa si ese correo ya existe.");
+    $("signupForm").reset();
+    if (data.session) { await loadSession(); }
+    else message("signupMessage", "Cuenta creada. Revisa tu correo y confirma la cuenta antes de ingresar.");
+  } catch (err) { message("signupMessage", `No se pudo registrar: ${err.message}`, true); }
+  finally { button.disabled = false; }
 });
 $("logoutButton").addEventListener("click", async () => {
   stopTracking(); if (channel) await supabase.removeChannel(channel);
