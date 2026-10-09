@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#14342b" />
+    <meta name="description" content="Registro sencillo de recorridos y kilometraje por persona." />
+    <title>Kilometraje</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Kilometraje, inicio">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 17.5c2.5-5 5.7-7.8 10-8.5M13.5 5.5 17 8.8l-3.7 3.4"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          </span>
+          <span>Kilometraje</span>
+        </a>
+        <button class="ghost-button" id="exportButton" type="button" title="Descargar todos los registros en CSV">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+          Exportar CSV
+        </button>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="pageTitle">
+          <div class="hero-copy">
+            <span class="eyebrow">CONTROL DE RECORRIDOS</span>
+            <h1 id="pageTitle">Cada kilómetro,<br /><em>bien contado.</em></h1>
+            <p>Registra los odómetros de inicio y fin. Nosotros hacemos las cuentas y organizamos el historial por persona.</p>
+          </div>
+          <div class="route-art" aria-hidden="true">
+            <svg viewBox="0 0 330 180" fill="none">
+              <path class="route-line" d="M18 151c42-8 44-58 87-55 42 3 37 59 85 52 49-7 25-78 91-99"/>
+              <circle class="route-dot start" cx="18" cy="151" r="7"/>
+              <circle class="route-dot end" cx="281" cy="49" r="11"/>
+              <path class="pin" d="M281 16c-15 0-27 12-27 27 0 20 27 47 27 47s27-27 27-47c0-15-12-27-27-27Z"/>
+              <circle class="pin-hole" cx="281" cy="43" r="8"/>
+            </svg>
+          </div>
+        </section>
+
+        <section class="stats" aria-label="Resumen de kilometraje">
+          <article class="stat-card primary-stat">
+            <span class="stat-icon" aria-hidden="true">↗</span>
+            <div><small>Total recorrido</small><strong><span id="totalKm">0</span> <b>km</b></strong></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon" aria-hidden="true">◷</span>
+            <div><small>Este mes</small><strong><span id="monthKm">0</span> <b>km</b></strong></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon" aria-hidden="true">◎</span>
+            <div><small>Recorridos</small><strong><span id="tripCount">0</span></strong></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon" aria-hidden="true">♙</span>
+            <div><small>Personas</small><strong><span id="personCount">0</span></strong></div>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <article class="panel form-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="section-number">01</span>
+                <h2>Nuevo recorrido</h2>
+              </div>
+              <p>Completa los datos del viaje.</p>
+            </div>
+
+            <form id="tripForm" novalidate>
+              <div class="field full-field">
+                <label for="person">Nombre de la persona <span>*</span></label>
+                <input id="person" name="person" type="text" placeholder="Ej. Carlos Ramírez" maxlength="60" autocomplete="name" required />
+                <span class="field-error" id="personError"></span>
+              </div>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="date">Fecha <span>*</span></label>
+                  <input id="date" name="date" type="date" required />
+                  <span class="field-error" id="dateError"></span>
+                </div>
+                <div class="field">
+                  <label for="vehicle">Vehículo</label>
+                  <input id="vehicle" name="vehicle" type="text" placeholder="Ej. Camioneta 02" maxlength="40" />
+                </div>
+              </div>
+
+              <div class="field full-field">
+                <label for="route">Ruta o motivo</label>
+                <input id="route" name="route" type="text" placeholder="Ej. Bodega → Cliente" maxlength="80" />
+              </div>
+
+              <div class="odometer-grid">
+                <div class="field">
+                  <label for="startKm">Kilometraje inicial <span>*</span></label>
+                  <div class="input-with-unit"><input id="startKm" name="startKm" type="number" inputmode="decimal" min="0" step="0.1" placeholder="0" required /><span>km</span></div>
+                  <span class="field-error" id="startKmError"></span>
+                </div>
+                <span class="arrow" aria-hidden="true">→</span>
+                <div class="field">
+                  <label for="endKm">Kilometraje final <span>*</span></label>
+                  <div class="input-with-unit"><input id="endKm" name="endKm" type="number" inputmode="decimal" min="0" step="0.1" placeholder="0" required /><span>km</span></div>
+                  <span class="field-error" id="endKmError"></span>
+                </div>
+              </div>
+
+              <div class="calculation" aria-live="polite">
+                <span>Distancia calculada</span>
+                <strong><span id="calculatedKm">0</span> km</strong>
+              </div>
+
+              <button class="submit-button" type="submit">
+                Guardar recorrido
+                <span aria-hidden="true">＋</span>
+              </button>
+            </form>
+          </article>
+
+          <article class="panel history-panel">
+            <div class="panel-heading history-heading">
+              <div>
+                <span class="section-number">02</span>
+                <h2>Historial</h2>
+              </div>
+              <label class="search-box">
+                <span class="sr-only">Buscar registros</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+                <input id="searchInput" type="search" placeholder="Buscar persona..." />
+              </label>
+            </div>
+
+            <div class="history-list" id="historyList"></div>
+
+            <div class="empty-state" id="emptyState">
+              <div class="empty-icon" aria-hidden="true">⌁</div>
+              <h3>Aún no hay recorridos</h3>
+              <p>Agrega el primer registro y aquí aparecerá todo el historial.</p>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">Recorrido guardado</div>
+
+    <template id="tripTemplate">
+      <article class="trip-row">
+        <div class="avatar"></div>
+        <div class="trip-main">
+          <strong class="trip-person"></strong>
+          <span class="trip-meta"></span>
+          <span class="trip-route"></span>
+        </div>
+        <div class="trip-distance"><strong></strong><span>km</span></div>
+        <button class="delete-button" type="button" aria-label="Eliminar recorrido" title="Eliminar recorrido">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg>
+        </button>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
