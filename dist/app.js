@@ -22137,6 +22137,15 @@
   var _a2;
   var configuredKey = ((_a2 = window.RutaSeguraConfig) == null ? void 0 : _a2.anonKey) || SUPABASE_ANON_KEY;
   var supabase = configuredUrl && configuredKey ? createClient(configuredUrl, configuredKey) : null;
+  var emailForCedula = (cedula) => "cedula-".concat(cedula, "@rutasegura.invalid");
+  async function requireCedulaOnlyAuth() {
+    const response = await fetch("".concat(configuredUrl, "/auth/v1/settings"), { headers: { apikey: configuredKey } });
+    if (!response.ok) throw new Error("No se pudo verificar la configuraci\xF3n de registro de Supabase.");
+    const settings = await response.json();
+    if (settings.mailer_autoconfirm !== true) {
+      throw new Error("El administrador debe desactivar Confirm Email en Supabase > Authentication > Providers > Email antes de registrar usuarios sin correo.");
+    }
+  }
   var user;
   var profile;
   var activeTrip;
@@ -22429,7 +22438,7 @@
     const button = $("registrationForm").querySelector('button[type="submit"]');
     const fullName = $("registerName").value.trim();
     const cedula = $("registerCedula").value.trim();
-    const email = $("registerEmail").value.trim().toLowerCase();
+    const email = emailForCedula(cedula);
     const password = $("registerPassword").value;
     const role = $("registerRole").value;
     if (fullName.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
@@ -22438,6 +22447,7 @@
     button.disabled = true;
     message("registrationMessage", "Registrando usuario...");
     try {
+      await requireCedulaOnlyAuth();
       const registrationClient = createClient(configuredUrl, configuredKey, {
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
       });
@@ -22447,11 +22457,11 @@
         options: { data: { full_name: fullName, cedula } }
       });
       if (error) throw error;
-      if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("No se pudo confirmar el registro. Revisa si el correo ya existe.");
+      if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("Esa c\xE9dula ya tiene una cuenta.");
       if (role === "admin") failure(await supabase.rpc("set_user_role", { p_user_id: data.user.id, p_role: "admin" }));
       $("registrationForm").reset();
       await refreshAdmin();
-      message("registrationMessage", data.session ? "Usuario registrado. Ya puede iniciar sesi\xF3n." : "Usuario registrado. Debe confirmar su correo antes de iniciar sesi\xF3n.");
+      message("registrationMessage", data.session ? "Usuario registrado. Ya puede ingresar con su c\xE9dula." : "Cuenta creada, pero Supabase exige confirmaci\xF3n de correo. Desactiva Confirm Email para usarla.", !data.session);
     } catch (err) {
       message("registrationMessage", "No se complet\xF3 el registro: ".concat(err.message, ". Si el usuario se cre\xF3, revisa su rol en la tabla."), true);
     } finally {
@@ -22486,7 +22496,9 @@
   $("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     message("loginError", "Ingresando...");
-    const { error } = await supabase.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+    const identifier = $("loginIdentifier").value.trim();
+    const email = /^[0-9]{6,15}$/.test(identifier) ? emailForCedula(identifier) : identifier.toLowerCase();
+    const { error } = await supabase.auth.signInWithPassword({ email, password: $("password").value });
     if (error) return message("loginError", error.message, true);
     message("loginError", "");
     await loadSession();
@@ -22501,7 +22513,7 @@
     event.preventDefault();
     const name = $("signupName").value.trim();
     const cedula = $("signupCedula").value.trim();
-    const email = $("signupEmail").value.trim().toLowerCase();
+    const email = emailForCedula(cedula);
     const password = $("signupPassword").value;
     if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
       return message("signupMessage", "Revisa el nombre, la c\xE9dula y la contrase\xF1a (m\xEDnimo 8 caracteres).", true);
@@ -22510,17 +22522,18 @@
     button.disabled = true;
     message("signupMessage", "Creando cuenta...");
     try {
+      await requireCedulaOnlyAuth();
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { full_name: name, cedula } }
       });
       if (error) throw error;
-      if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("No se pudo confirmar el registro. Revisa si ese correo ya existe.");
+      if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("Esa c\xE9dula ya tiene una cuenta.");
       $("signupForm").reset();
       if (data.session) {
         await loadSession();
-      } else message("signupMessage", "Cuenta creada. Revisa tu correo y confirma la cuenta antes de ingresar.");
+      } else message("signupMessage", "Cuenta creada, pero Supabase exige confirmaci\xF3n de correo. Pide al administrador que desactive Confirm Email.", true);
     } catch (err) {
       message("signupMessage", "No se pudo registrar: ".concat(err.message), true);
     } finally {
