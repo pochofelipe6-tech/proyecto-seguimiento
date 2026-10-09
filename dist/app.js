@@ -22124,8 +22124,8 @@
   var import_leaflet = __toESM(require_leaflet_src());
 
   // src/supabase-config.js
-  var SUPABASE_URL = "";
-  var SUPABASE_ANON_KEY = "";
+  var SUPABASE_URL = "https://imbxqvkslenmpkdesnex.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_kzJfsTPh5HofKtPHBJKKdw_BV6XMjWh";
 
   // src/app-main.js
   var $ = (id) => document.getElementById(id);
