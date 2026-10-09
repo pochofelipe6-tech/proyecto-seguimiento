@@ -22375,9 +22375,20 @@
     }
   });
   async function loadDriver() {
-    const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").or("driver_id.eq.".concat(user.id, ",assistant_id.eq.").concat(user.id, ",route_manager_id.eq.").concat(user.id)).eq("enabled", true).order("plate"));
+    let pendingMigration = false;
+    let vehicleResult = await supabase.from("vehicles").select("id,plate,label").or("driver_id.eq.".concat(user.id, ",assistant_id.eq.").concat(user.id, ",route_manager_id.eq.").concat(user.id)).eq("enabled", true).order("plate");
+    if (vehicleResult.error && /assistant_id|route_manager_id/.test(vehicleResult.error.message || "")) {
+      pendingMigration = true;
+      vehicleResult = await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate");
+    }
+    const vehicles = failure(vehicleResult);
     $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => '<option value="'.concat(v.id, '">').concat(clean(v.plate)).concat(v.label ? " \xB7 ".concat(clean(v.label)) : "", "</option>")).join("") : '<option value="">Sin veh\xEDculo asignado</option>';
-    const trips = failure(await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1));
+    let tripResult = await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1);
+    if (tripResult.error && /tracker_id/.test(tripResult.error.message || "")) {
+      pendingMigration = true;
+      tripResult = await supabase.from("trips").select("*").eq("driver_id", user.id).is("ended_at", null).limit(1);
+    }
+    const trips = failure(tripResult);
     activeTrip = trips[0] || null;
     renderTrip();
     await loadDriverAlerts().catch((err) => message("driverMessage", "No se pudieron cargar las alertas: ".concat(err.message), true));
@@ -22386,6 +22397,7 @@
       await startTracking().catch(() => {
       });
     }
+    if (pendingMigration) message("driverMessage", "Tu cuenta inici\xF3 sesi\xF3n, pero faltan columnas en Supabase. Ejecuta las migraciones 006, 005, 007 y 008 en ese orden para activar veh\xEDculos y seguimiento completos.", true);
   }
   async function loadDriverAlerts() {
     const result = await supabase.from("speed_alerts").select("trip_id,occurred_at,sector,zone,peak_speed_kmh,limit_kmh", { count: "exact" }).order("occurred_at", { ascending: false }).limit(50);
