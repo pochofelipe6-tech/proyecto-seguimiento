@@ -131,6 +131,25 @@ begin
 end;
 $$;
 
+create or replace function public.create_simple_vehicle(p_driver_name text, p_plate text)
+returns public.vehicles language plpgsql security definer set search_path = '' as $$
+declare v_profile public.profiles; v_vehicle public.vehicles;
+begin
+  if (select auth.uid()) is null then raise exception 'Inicia sesión'; end if;
+  select * into v_profile from public.profiles where id = (select auth.uid());
+  if not found then raise exception 'No se encontró tu perfil'; end if;
+  if length(trim(coalesce(p_driver_name, ''))) < 3
+    or lower(trim(p_driver_name)) <> lower(trim(v_profile.full_name)) then
+    raise exception 'El nombre del conductor debe coincidir con el nombre de tu cuenta';
+  end if;
+  if upper(trim(coalesce(p_plate, ''))) !~ '^[A-Z0-9]{5,8}$' then raise exception 'Placa inválida'; end if;
+  insert into public.vehicles (plate, driver_id)
+  values (upper(trim(p_plate)), v_profile.id)
+  returning * into v_vehicle;
+  return v_vehicle;
+end;
+$$;
+
 create or replace function public.create_route_vehicle(
   p_dt_number text, p_plate text, p_rr_cedula text, p_driver_cedula text,
   p_assistant_cedula text default null
@@ -271,6 +290,7 @@ revoke all on function public.record_position(uuid,double precision,double preci
 revoke all on function public.finish_trip(uuid) from public;
 revoke all on function public.set_user_role(uuid,text) from public;
 revoke all on function public.lookup_route_person(text) from public;
+revoke all on function public.create_simple_vehicle(text,text) from public;
 revoke all on function public.create_route_vehicle(text,text,text,text,text) from public;
 revoke all on function public.list_my_route_vehicles() from public;
 grant execute on function public.start_trip(uuid,text,text) to authenticated;
@@ -278,6 +298,7 @@ grant execute on function public.record_position(uuid,double precision,double pr
 grant execute on function public.finish_trip(uuid) to authenticated;
 grant execute on function public.set_user_role(uuid,text) to authenticated;
 grant execute on function public.lookup_route_person(text) to authenticated;
+grant execute on function public.create_simple_vehicle(text,text) to authenticated;
 grant execute on function public.create_route_vehicle(text,text,text,text,text) to authenticated;
 grant execute on function public.list_my_route_vehicles() to authenticated;
 

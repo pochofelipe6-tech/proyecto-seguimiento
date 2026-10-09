@@ -22294,48 +22294,11 @@
   }
   $("startButton").textContent = "Iniciar seguimiento";
   $("driverVehicle").closest("label").insertAdjacentHTML("afterend", '<button id="showVehicleForm" type="button" class="secondary vehicle-add-button">Agregar veh\xEDculo</button>');
-  $("tripForm").insertAdjacentHTML("afterend", '\n  <section id="driverVehiclePanel" class="vehicle-registration" hidden>\n    <h2>Agregar veh\xEDculo a la ruta</h2>\n    <form id="driverVehicleForm">\n      <div class="vehicle-form-grid">\n        <label>N\xFAmero de DT<input id="vehicleDt" type="text" maxlength="40" required></label>\n        <label>Placa del veh\xEDculo<input id="vehiclePlateNew" type="text" maxlength="8" placeholder="ABC123" required></label>\n        <label>C\xE9dula de responsable de ruta (RR)<input id="vehicleRrCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleRrName" class="person-result" aria-live="polite"></small></label>\n        <label>C\xE9dula de conductor<input id="vehicleDriverCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleDriverName" class="person-result" aria-live="polite"></small></label>\n        <label>C\xE9dula de auxiliar (opcional)<input id="vehicleAssistantCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15"><small id="vehicleAssistantName" class="person-result" aria-live="polite"></small></label>\n      </div>\n      <button type="submit">Guardar veh\xEDculo</button>\n      <p id="driverVehicleMessage" class="message" role="status"></p>\n    </form>\n    <h2>Veh\xEDculos registrados</h2>\n    <div class="table-scroll"><table><thead><tr><th>DT</th><th>Placa</th><th>Responsable de ruta</th><th>Conductor</th><th>Auxiliar</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>\n  </section>');
+  $("tripForm").insertAdjacentHTML("afterend", '\n  <section id="driverVehiclePanel" class="vehicle-registration" hidden>\n    <h2>Agregar veh\xEDculo a la ruta</h2>\n    <form id="driverVehicleForm">\n      <div class="vehicle-form-grid">\n        <label>Nombre del conductor<input id="vehicleDriverNameInput" type="text" maxlength="100" autocomplete="name" required></label>\n        <label>Placa del veh\xEDculo<input id="vehiclePlateNew" type="text" maxlength="8" placeholder="ABC123" required></label>\n      </div>\n      <button type="submit">Guardar veh\xEDculo</button>\n      <p id="driverVehicleMessage" class="message" role="status"></p>\n    </form>\n    <h2>Veh\xEDculos registrados</h2>\n    <div class="table-scroll"><table><thead><tr><th>Conductor</th><th>Placa</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>\n  </section>');
   $("driverView").insertAdjacentHTML("beforeend", '<section class="panel table-panel"><div class="panel-heading"><h2>Mis alertas de velocidad</h2><span id="driverAlertCount">0 eventos</span></div><div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Placa</th><th>Sector</th><th>Zona</th><th>Velocidad m\xE1xima</th><th>L\xEDmite</th></tr></thead><tbody id="driverAlertRows"><tr><td colspan="6">A\xFAn no hay alertas.</td></tr></tbody></table></div></section>');
-  var personFields = [
-    { input: "vehicleRrCedula", output: "vehicleRrName", required: true },
-    { input: "vehicleDriverCedula", output: "vehicleDriverName", required: true },
-    { input: "vehicleAssistantCedula", output: "vehicleAssistantName", required: false }
-  ];
-  async function lookupPerson(field) {
-    const cedula = $(field.input).value.trim();
-    if (!cedula && !field.required) {
-      $(field.output).textContent = "Sin auxiliar";
-      return null;
-    }
-    if (!/^[0-9]{6,15}$/.test(cedula)) {
-      $(field.output).textContent = "Escribe una c\xE9dula v\xE1lida";
-      return null;
-    }
-    try {
-      const people = failure(await supabase.rpc("lookup_route_person", { p_cedula: cedula }));
-      if ($(field.input).value.trim() !== cedula) return null;
-      const person = people == null ? void 0 : people[0];
-      $(field.output).textContent = (person == null ? void 0 : person.person_name) || "No se encontr\xF3 esa c\xE9dula";
-      return person || null;
-    } catch (err) {
-      $(field.output).textContent = "No se pudo consultar la c\xE9dula. Revisa la migraci\xF3n 005.";
-      return null;
-    }
-  }
-  for (const field of personFields) {
-    let timer;
-    $(field.input).addEventListener("input", () => {
-      clearTimeout(timer);
-      $(field.output).textContent = "Buscando...";
-      timer = setTimeout(() => lookupPerson(field), 300);
-    });
-  }
-  function formatPerson(name, cedula) {
-    return name ? "".concat(clean(name), "<br><small>").concat(clean(cedula || ""), "</small>") : "\u2014";
-  }
   async function loadDriverVehicleTable() {
-    const rows = failure(await supabase.rpc("list_my_route_vehicles"));
-    $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => "<tr><td>".concat(clean(v.dt_number || "\u2014"), "</td><td>").concat(clean(v.plate), "</td><td>").concat(formatPerson(v.rr_name, v.rr_cedula), "</td><td>").concat(formatPerson(v.driver_name, v.driver_cedula), "</td><td>").concat(formatPerson(v.assistant_name, v.assistant_cedula), "</td></tr>")).join("") : '<tr><td colspan="5">A\xFAn no hay veh\xEDculos registrados.</td></tr>';
+    const rows = failure(await supabase.from("vehicles").select("id,plate").eq("driver_id", user.id).order("plate"));
+    $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => "<tr><td>".concat(clean(profile.full_name || "\u2014"), "</td><td>").concat(clean(v.plate), "</td></tr>")).join("") : '<tr><td colspan="2">A\xFAn no hay veh\xEDculos registrados.</td></tr>';
   }
   $("showVehicleForm").addEventListener("click", async () => {
     var _a3;
@@ -22343,9 +22306,8 @@
     panel.hidden = !panel.hidden;
     $("showVehicleForm").textContent = panel.hidden ? "Agregar veh\xEDculo" : "Cerrar registro de veh\xEDculo";
     if (!panel.hidden) {
-      (_a3 = $("vehicleDriverCedula")).value || (_a3.value = (profile == null ? void 0 : profile.cedula) || "");
-      if ($("vehicleDriverCedula").value) lookupPerson(personFields[1]);
-      await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", "No se pudo cargar la tabla: ".concat(err.message, ". Ejecuta la migraci\xF3n 005."), true));
+      (_a3 = $("vehicleDriverNameInput")).value || (_a3.value = (profile == null ? void 0 : profile.full_name) || "");
+      await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", "No se pudo cargar la tabla: ".concat(err.message), true));
     }
   });
   $("driverVehicleForm").addEventListener("submit", async (event) => {
@@ -22353,39 +22315,26 @@
     const button = $("driverVehicleForm").querySelector('button[type="submit"]');
     button.disabled = true;
     try {
-      for (const field of personFields) {
-        if (!await lookupPerson(field) && (field.required || $(field.input).value.trim())) throw new Error("Revisa la ".concat(field.input === "vehicleRrCedula" ? "c\xE9dula del responsable" : field.input === "vehicleDriverCedula" ? "c\xE9dula del conductor" : "c\xE9dula del auxiliar", "."));
-      }
-      failure(await supabase.rpc("create_route_vehicle", {
-        p_dt_number: $("vehicleDt").value.trim(),
-        p_plate: $("vehiclePlateNew").value.trim().toUpperCase(),
-        p_rr_cedula: $("vehicleRrCedula").value.trim(),
-        p_driver_cedula: $("vehicleDriverCedula").value.trim(),
-        p_assistant_cedula: $("vehicleAssistantCedula").value.trim() || null
-      }));
+      const name = $("vehicleDriverNameInput").value.trim();
+      const plate = $("vehiclePlateNew").value.trim().toUpperCase();
+      if (name.length < 3 || !/^[A-Z0-9]{5,8}$/.test(plate)) throw new Error("Revisa el nombre del conductor y la placa (5 a 8 letras o n\xFAmeros).");
+      failure(await supabase.rpc("create_simple_vehicle", { p_driver_name: name, p_plate: plate }));
       $("driverVehicleForm").reset();
-      $("vehicleDriverCedula").value = profile.cedula || "";
+      $("vehicleDriverNameInput").value = profile.full_name || "";
       await loadDriverVehicleTable();
       await loadDriver();
       message("driverVehicleMessage", "Veh\xEDculo registrado y disponible en el selector.");
     } catch (err) {
-      message("driverVehicleMessage", "No se pudo guardar: ".concat(err.message), true);
+      message("driverVehicleMessage", "No se pudo guardar: ".concat(err.message, ". Si falta create_simple_vehicle, ejecuta la migraci\xF3n 009."), true);
     } finally {
       button.disabled = false;
     }
   });
   async function loadDriver() {
-    let pendingMigration = false;
-    let vehicleResult = await supabase.from("vehicles").select("id,plate,label").or("driver_id.eq.".concat(user.id, ",assistant_id.eq.").concat(user.id, ",route_manager_id.eq.").concat(user.id)).eq("enabled", true).order("plate");
-    if (vehicleResult.error && /assistant_id|route_manager_id/.test(vehicleResult.error.message || "")) {
-      pendingMigration = true;
-      vehicleResult = await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate");
-    }
-    const vehicles = failure(vehicleResult);
+    const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate"));
     $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => '<option value="'.concat(v.id, '">').concat(clean(v.plate)).concat(v.label ? " \xB7 ".concat(clean(v.label)) : "", "</option>")).join("") : '<option value="">Sin veh\xEDculo asignado</option>';
     let tripResult = await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1);
     if (tripResult.error && /tracker_id/.test(tripResult.error.message || "")) {
-      pendingMigration = true;
       tripResult = await supabase.from("trips").select("*").eq("driver_id", user.id).is("ended_at", null).limit(1);
     }
     const trips = failure(tripResult);
@@ -22397,7 +22346,6 @@
       await startTracking().catch(() => {
       });
     }
-    if (pendingMigration) message("driverMessage", "Tu cuenta inici\xF3 sesi\xF3n, pero faltan columnas en Supabase. Ejecuta las migraciones 006, 005, 007 y 008 en ese orden para activar veh\xEDculos y seguimiento completos.", true);
   }
   async function loadDriverAlerts() {
     const result = await supabase.from("speed_alerts").select("trip_id,occurred_at,sector,zone,peak_speed_kmh,limit_kmh", { count: "exact" }).order("occurred_at", { ascending: false }).limit(50);

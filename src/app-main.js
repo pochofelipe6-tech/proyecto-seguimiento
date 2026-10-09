@@ -119,57 +119,27 @@ $("tripForm").insertAdjacentHTML("afterend", `
     <h2>Agregar vehículo a la ruta</h2>
     <form id="driverVehicleForm">
       <div class="vehicle-form-grid">
-        <label>Número de DT<input id="vehicleDt" type="text" maxlength="40" required></label>
+        <label>Nombre del conductor<input id="vehicleDriverNameInput" type="text" maxlength="100" autocomplete="name" required></label>
         <label>Placa del vehículo<input id="vehiclePlateNew" type="text" maxlength="8" placeholder="ABC123" required></label>
-        <label>Cédula de responsable de ruta (RR)<input id="vehicleRrCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleRrName" class="person-result" aria-live="polite"></small></label>
-        <label>Cédula de conductor<input id="vehicleDriverCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleDriverName" class="person-result" aria-live="polite"></small></label>
-        <label>Cédula de auxiliar (opcional)<input id="vehicleAssistantCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15"><small id="vehicleAssistantName" class="person-result" aria-live="polite"></small></label>
       </div>
       <button type="submit">Guardar vehículo</button>
       <p id="driverVehicleMessage" class="message" role="status"></p>
     </form>
     <h2>Vehículos registrados</h2>
-    <div class="table-scroll"><table><thead><tr><th>DT</th><th>Placa</th><th>Responsable de ruta</th><th>Conductor</th><th>Auxiliar</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>
+    <div class="table-scroll"><table><thead><tr><th>Conductor</th><th>Placa</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>
   </section>`);
 $("driverView").insertAdjacentHTML("beforeend", '<section class="panel table-panel"><div class="panel-heading"><h2>Mis alertas de velocidad</h2><span id="driverAlertCount">0 eventos</span></div><div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Placa</th><th>Sector</th><th>Zona</th><th>Velocidad máxima</th><th>Límite</th></tr></thead><tbody id="driverAlertRows"><tr><td colspan="6">Aún no hay alertas.</td></tr></tbody></table></div></section>');
-const personFields = [
-  { input: "vehicleRrCedula", output: "vehicleRrName", required: true },
-  { input: "vehicleDriverCedula", output: "vehicleDriverName", required: true },
-  { input: "vehicleAssistantCedula", output: "vehicleAssistantName", required: false },
-];
-async function lookupPerson(field) {
-  const cedula = $(field.input).value.trim();
-  if (!cedula && !field.required) { $(field.output).textContent = "Sin auxiliar"; return null; }
-  if (!/^[0-9]{6,15}$/.test(cedula)) { $(field.output).textContent = "Escribe una cédula válida"; return null; }
-  try {
-    const people = failure(await supabase.rpc("lookup_route_person", { p_cedula: cedula }));
-    if ($(field.input).value.trim() !== cedula) return null;
-    const person = people?.[0];
-    $(field.output).textContent = person?.person_name || "No se encontró esa cédula";
-    return person || null;
-  } catch (err) { $(field.output).textContent = "No se pudo consultar la cédula. Revisa la migración 005."; return null; }
-}
-for (const field of personFields) {
-  let timer;
-  $(field.input).addEventListener("input", () => {
-    clearTimeout(timer);
-    $(field.output).textContent = "Buscando...";
-    timer = setTimeout(() => lookupPerson(field), 300);
-  });
-}
-function formatPerson(name, cedula) { return name ? `${clean(name)}<br><small>${clean(cedula || "")}</small>` : "—"; }
 async function loadDriverVehicleTable() {
-  const rows = failure(await supabase.rpc("list_my_route_vehicles"));
-  $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => `<tr><td>${clean(v.dt_number || "—")}</td><td>${clean(v.plate)}</td><td>${formatPerson(v.rr_name, v.rr_cedula)}</td><td>${formatPerson(v.driver_name, v.driver_cedula)}</td><td>${formatPerson(v.assistant_name, v.assistant_cedula)}</td></tr>`).join("") : '<tr><td colspan="5">Aún no hay vehículos registrados.</td></tr>';
+  const rows = failure(await supabase.from("vehicles").select("id,plate").eq("driver_id", user.id).order("plate"));
+  $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => `<tr><td>${clean(profile.full_name || "—")}</td><td>${clean(v.plate)}</td></tr>`).join("") : '<tr><td colspan="2">Aún no hay vehículos registrados.</td></tr>';
 }
 $("showVehicleForm").addEventListener("click", async () => {
   const panel = $("driverVehiclePanel");
   panel.hidden = !panel.hidden;
   $("showVehicleForm").textContent = panel.hidden ? "Agregar vehículo" : "Cerrar registro de vehículo";
   if (!panel.hidden) {
-    $("vehicleDriverCedula").value ||= profile?.cedula || "";
-    if ($("vehicleDriverCedula").value) lookupPerson(personFields[1]);
-    await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", `No se pudo cargar la tabla: ${err.message}. Ejecuta la migración 005.`, true));
+    $("vehicleDriverNameInput").value ||= profile?.full_name || "";
+    await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", `No se pudo cargar la tabla: ${err.message}`, true));
   }
 });
 $("driverVehicleForm").addEventListener("submit", async (event) => {
@@ -177,41 +147,29 @@ $("driverVehicleForm").addEventListener("submit", async (event) => {
   const button = $("driverVehicleForm").querySelector('button[type="submit"]');
   button.disabled = true;
   try {
-    for (const field of personFields) {
-      if (!await lookupPerson(field) && (field.required || $(field.input).value.trim())) throw new Error(`Revisa la ${field.input === "vehicleRrCedula" ? "cédula del responsable" : field.input === "vehicleDriverCedula" ? "cédula del conductor" : "cédula del auxiliar"}.`);
-    }
-    failure(await supabase.rpc("create_route_vehicle", {
-      p_dt_number: $("vehicleDt").value.trim(), p_plate: $("vehiclePlateNew").value.trim().toUpperCase(),
-      p_rr_cedula: $("vehicleRrCedula").value.trim(), p_driver_cedula: $("vehicleDriverCedula").value.trim(),
-      p_assistant_cedula: $("vehicleAssistantCedula").value.trim() || null,
-    }));
+    const name = $("vehicleDriverNameInput").value.trim();
+    const plate = $("vehiclePlateNew").value.trim().toUpperCase();
+    if (name.length < 3 || !/^[A-Z0-9]{5,8}$/.test(plate)) throw new Error("Revisa el nombre del conductor y la placa (5 a 8 letras o números).");
+    failure(await supabase.rpc("create_simple_vehicle", { p_driver_name: name, p_plate: plate }));
     $("driverVehicleForm").reset();
-    $("vehicleDriverCedula").value = profile.cedula || "";
+    $("vehicleDriverNameInput").value = profile.full_name || "";
     await loadDriverVehicleTable();
     await loadDriver();
     message("driverVehicleMessage", "Vehículo registrado y disponible en el selector.");
-  } catch (err) { message("driverVehicleMessage", `No se pudo guardar: ${err.message}`, true); }
+  } catch (err) { message("driverVehicleMessage", `No se pudo guardar: ${err.message}. Si falta create_simple_vehicle, ejecuta la migración 009.`, true); }
   finally { button.disabled = false; }
 });
 async function loadDriver() {
-  let pendingMigration = false;
-  let vehicleResult = await supabase.from("vehicles").select("id,plate,label").or(`driver_id.eq.${user.id},assistant_id.eq.${user.id},route_manager_id.eq.${user.id}`).eq("enabled", true).order("plate");
-  if (vehicleResult.error && /assistant_id|route_manager_id/.test(vehicleResult.error.message || "")) {
-    pendingMigration = true;
-    vehicleResult = await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate");
-  }
-  const vehicles = failure(vehicleResult);
+  const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate"));
   $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => `<option value="${v.id}">${clean(v.plate)}${v.label ? ` · ${clean(v.label)}` : ""}</option>`).join("") : '<option value="">Sin vehículo asignado</option>';
   let tripResult = await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1);
   if (tripResult.error && /tracker_id/.test(tripResult.error.message || "")) {
-    pendingMigration = true;
     tripResult = await supabase.from("trips").select("*").eq("driver_id", user.id).is("ended_at", null).limit(1);
   }
   const trips = failure(tripResult);
   activeTrip = trips[0] || null; renderTrip();
   await loadDriverAlerts().catch((err) => message("driverMessage", `No se pudieron cargar las alertas: ${err.message}`, true));
   if (activeTrip) { $("driverVehicle").value = activeTrip.vehicle_id; await startTracking().catch(() => {}); }
-  if (pendingMigration) message("driverMessage", "Tu cuenta inició sesión, pero faltan columnas en Supabase. Ejecuta las migraciones 006, 005, 007 y 008 en ese orden para activar vehículos y seguimiento completos.", true);
 }
 async function loadDriverAlerts() {
   const result = await supabase.from("speed_alerts").select("trip_id,occurred_at,sector,zone,peak_speed_kmh,limit_kmh", { count: "exact" }).order("occurred_at", { ascending: false }).limit(50);
