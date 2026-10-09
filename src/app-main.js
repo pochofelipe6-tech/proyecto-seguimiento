@@ -292,13 +292,15 @@ $("loginForm").addEventListener("submit", async (event) => {
 });
 $("showSignup").addEventListener("click", () => { message("signupMessage", ""); show("signupView"); });
 $("backToLogin").addEventListener("click", () => show("loginView"));
+$("showSignup").textContent = "Crear cuenta";
 $("signupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const name = $("signupName").value.trim();
   const cedula = $("signupCedula").value.trim();
   const email = emailForCedula(cedula);
   const password = $("signupPassword").value;
-  if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
+  const role = $("signupRole").value;
+  if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8 || !["driver", "assistant", "route_manager"].includes(role)) {
     return message("signupMessage", "Revisa el nombre, la cédula y la contraseña (mínimo 8 caracteres).", true);
   }
   const button = $("signupForm").querySelector('button[type="submit"]');
@@ -306,7 +308,7 @@ $("signupForm").addEventListener("submit", async (event) => {
   try {
     await requireCedulaOnlyAuth();
     const { data, error } = await supabase.auth.signUp({
-      email, password, options: { data: { full_name: name, cedula } },
+      email, password, options: { data: { full_name: name, cedula, role } },
     });
     if (error) throw error;
     if (!data.user || data.user.identities?.length === 0) throw new Error("Esa cédula ya tiene una cuenta.");

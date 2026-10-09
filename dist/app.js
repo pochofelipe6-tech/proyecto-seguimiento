@@ -22537,6 +22537,7 @@
     show("signupView");
   });
   $("backToLogin").addEventListener("click", () => show("loginView"));
+  $("showSignup").textContent = "Crear cuenta";
   $("signupForm").addEventListener("submit", async (event) => {
     var _a3;
     event.preventDefault();
@@ -22544,7 +22545,8 @@
     const cedula = $("signupCedula").value.trim();
     const email = emailForCedula(cedula);
     const password = $("signupPassword").value;
-    if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
+    const role = $("signupRole").value;
+    if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8 || !["driver", "assistant", "route_manager"].includes(role)) {
       return message("signupMessage", "Revisa el nombre, la c\xE9dula y la contrase\xF1a (m\xEDnimo 8 caracteres).", true);
     }
     const button = $("signupForm").querySelector('button[type="submit"]');
@@ -22555,7 +22557,7 @@
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: name, cedula } }
+        options: { data: { full_name: name, cedula, role } }
       });
       if (error) throw error;
       if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("Esa c\xE9dula ya tiene una cuenta.");
