@@ -6,10 +6,10 @@ export const dynamic = "force-dynamic";
 
 export default function Home() {
   // Solo estos dos valores son públicos. Nunca enviar las claves secretas al cliente.
-  const url = process.env.SUPABASE_URL || "";
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
   const config = {
     url: /(tu-proyecto|your-project|example)\.supabase\.co/i.test(url) ? "" : url,
-    anonKey: process.env.SUPABASE_ANON_KEY || "",
+    anonKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || "",
   };
   const document = readFileSync(join(process.cwd(), "dist", "index.html"), "utf8");
   const body = document.match(/<body>([\s\S]*?)<\/body>/i)?.[1]

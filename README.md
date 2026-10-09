@@ -2,7 +2,7 @@
 
 ## Aplicación web con Next.js
 
-La versión web usa Next.js App Router. Copia `.env.example` a `.env.local` y coloca `SUPABASE_URL` y `SUPABASE_ANON_KEY` reales de tu proyecto. En este entorno `.env.local` ya existe y la app lee esos valores directamente. El archivo está excluido de Git. Las variables privadas (`SUPABASE_SECRET_KEY`, VAPID y otras) no se envían al navegador. La compilación del APK toma de ese archivo **solo** la URL y la clave pública; debes volver a ejecutar `npm run android:apk` después de configurar Supabase.
+La versión web usa Next.js App Router. En `.env.local`, coloca `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` reales de tu proyecto. Los nombres antiguos `SUPABASE_URL` y `SUPABASE_ANON_KEY` también funcionan. El archivo está excluido de Git. Las variables privadas (`SUPABASE_SECRET_KEY`, VAPID y otras) no se envían al navegador. La compilación del APK toma de ese archivo **solo** la URL y la clave pública; debes volver a ejecutar `npm run android:apk` después de configurar Supabase.
 
 Ejecuta `npm install`, `npm run dev` y abre `http://localhost:3000`. Para producción, usa `npm run build` y `npm run start`. El proyecto Android/Capacitor y su compilación con `npm run android:apk` continúan disponibles por separado.
 
@@ -13,7 +13,7 @@ Aplicación Android (Capacitor) con dos roles: conductor y administrador. Usa Su
 1. Crea un proyecto Supabase y ejecuta [schema.sql](supabase/schema.sql) en SQL Editor.
 2. En Authentication, crea las cuentas de los conductores y del administrador. Cada cuenta recibe un perfil `driver` automáticamente.
 3. En SQL Editor, cambia el rol del administrador: `update public.profiles set role = 'admin' where id = '<UUID_DEL_USUARIO_ADMIN>';`. El UUID está en Authentication > Users.
-4. Copia **Project URL** y la clave **anon/publishable** en [supabase-config.js](src/supabase-config.js). Nunca uses la clave `service_role` dentro de la app.
+4. Copia **Project URL** y la clave **publishable** en `.env.local`. Nunca uses la clave `service_role` dentro de la app.
 5. Ejecuta `npm install` y `npm run android:apk`. La salida está en `Ruta-Segura.apk`. Para web, ejecuta `npm run build:web` y sirve `dist/` con HTTPS para acceder al GPS.
 
 El administrador puede dar de alta una placa y asignarla a una cuenta de conductor. El conductor inicia una ruta, acepta el permiso de ubicación y mantiene la app abierta. El GPS envía coordenadas y velocidad aproximadamente cada 4 segundos. El servidor guarda las posiciones en `positions`, el estado y kilometraje acumulado en `trips` y cada episodio de exceso en `speed_alerts`. Una alerta continúa actualizando su velocidad máxima mientras el vehículo siga sobre el límite; al volver al límite y superarlo de nuevo, se crea otro evento. La tabla de rutas deja vacía la celda de alerta si esa ruta no registró excesos.
