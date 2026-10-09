@@ -3,168 +3,91 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#14342b" />
-    <meta name="description" content="Registro sencillo de recorridos y kilometraje por persona." />
-    <title>Kilometraje</title>
+    <meta name="theme-color" content="#101c25" />
+    <meta name="description" content="Monitor de velocidad y registro de excesos por conductor, placa, sector y zona." />
+    <title>Ruta Segura · Monitor SST</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <header class="topbar">
-        <a class="brand" href="#" aria-label="Kilometraje, inicio">
-          <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M4 17.5c2.5-5 5.7-7.8 10-8.5M13.5 5.5 17 8.8l-3.7 3.4"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-          </span>
-          <span>Kilometraje</span>
-        </a>
-        <button class="ghost-button" id="exportButton" type="button" title="Descargar todos los registros en CSV">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
-          Exportar CSV
-        </button>
-      </header>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Ruta Segura, inicio">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4.7 6v5.3c0 4.7 3 8.3 7.3 9.7 4.3-1.4 7.3-5 7.3-9.7V6L12 3Z"/><path d="m8.6 12.1 2.1 2.1 4.7-5"/></svg></span>
+        <span>Ruta <b>Segura</b></span>
+      </a>
+      <div class="top-actions">
+        <span class="system-state" id="systemState"><i></i> Sistema listo</span>
+        <button class="outline-button" id="exportButton" type="button" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>Exportar</button>
+      </div>
+    </header>
 
-      <main>
-        <section class="hero" aria-labelledby="pageTitle">
-          <div class="hero-copy">
-            <span class="eyebrow">CONTROL DE RECORRIDOS</span>
-            <h1 id="pageTitle">Cada kilómetro,<br /><em>bien contado.</em></h1>
-            <p>Registra los odómetros de inicio y fin. Nosotros hacemos las cuentas y organizamos el historial por persona.</p>
+    <main class="page-shell">
+      <section class="intro">
+        <div><span class="eyebrow">CONTROL PREVENTIVO SST</span><h1>Monitoreo de<br /><em>velocidad en ruta.</em></h1><p>Activa el GPS, recibe alertas al instante y conserva un registro de cada exceso por placa, conductor, zona y sector.</p></div>
+        <div class="live-pill"><span id="livePulse"></span><b id="liveLabel">Sin monitoreo</b></div>
+      </section>
+
+      <section class="monitor-grid">
+        <article class="setup-card panel">
+          <div class="section-title"><div><span class="section-kicker">CONFIGURACIÓN</span><h2>Datos del recorrido</h2></div><span class="step">01</span></div>
+          <form id="monitorForm" novalidate>
+            <div class="form-row">
+              <label class="field"><span>Conductor *</span><input id="driver" type="text" placeholder="Nombre completo" maxlength="60" autocomplete="name" required /></label>
+              <label class="field"><span>Placa *</span><input id="plate" type="text" placeholder="ABC 123" maxlength="8" autocapitalize="characters" required /></label>
+            </div>
+            <label class="field"><span>Sector o tramo *</span><input id="sector" type="text" placeholder="Ej. Barrio San José / Km 18" maxlength="90" required /></label>
+            <fieldset>
+              <legend>Zona y límite preventivo SST *</legend>
+              <div class="zone-options" id="zoneOptions">
+                <label class="zone-option"><input type="radio" name="zone" value="urbana" checked /><span class="zone-emoji">🏙️</span><span><b>Zona urbana</b><small>Máximo 50 km/h</small></span><strong>50</strong></label>
+                <label class="zone-option"><input type="radio" name="zone" value="nacional" /><span class="zone-emoji">🛣️</span><span><b>Vía nacional</b><small>Máximo 70 km/h</small></span><strong>70</strong></label>
+                <label class="zone-option"><input type="radio" name="zone" value="curvas" /><span class="zone-emoji">🌀</span><span><b>Curvas</b><small>Máximo 35 km/h</small></span><strong>35</strong></label>
+                <label class="zone-option"><input type="radio" name="zone" value="escolar" /><span class="zone-emoji">🏫</span><span><b>Escolar / residencial</b><small>Máximo 30 km/h</small></span><strong>30</strong></label>
+              </div>
+            </fieldset>
+            <p class="form-message" id="formMessage" role="alert"></p>
+            <button class="start-button" id="startButton" type="submit"><span class="button-icon">▶</span><span>Iniciar monitoreo</span></button>
+            <button class="test-button" id="testAlertButton" type="button">🔊 Probar sonido de alerta</button>
+            <button class="test-button" id="simulateEventButton" type="button" hidden>⚠ Simular exceso de prueba</button>
+          </form>
+        </article>
+
+        <article class="speed-card panel" id="speedCard">
+          <div class="section-title dark-title"><div><span class="section-kicker">VELOCIDAD ACTUAL</span><h2 id="activeZone">Zona urbana</h2></div><span class="gps-state" id="gpsState">GPS inactivo</span></div>
+          <div class="speed-body">
+            <div class="speedometer" id="speedometer" style="--speed-angle: -130deg"><div class="speed-arc"></div><div class="needle"></div><div class="needle-center"></div><div class="speed-value"><strong id="currentSpeed">0</strong><span>km/h</span></div></div>
+            <div class="limit-box"><span>Límite activo</span><strong id="activeLimit">50</strong><small>km/h</small></div>
+            <div class="status-banner" id="statusBanner"><span>✓</span><div><b>Velocidad segura</b><small>Estás dentro del límite permitido</small></div></div>
+            <div class="live-details"><div><span>Conductor</span><b id="liveDriver">—</b></div><div><span>Placa</span><b id="livePlate">—</b></div><div><span>Sector</span><b id="liveSector">—</b></div></div>
           </div>
-          <div class="route-art" aria-hidden="true">
-            <svg viewBox="0 0 330 180" fill="none">
-              <path class="route-line" d="M18 151c42-8 44-58 87-55 42 3 37 59 85 52 49-7 25-78 91-99"/>
-              <circle class="route-dot start" cx="18" cy="151" r="7"/>
-              <circle class="route-dot end" cx="281" cy="49" r="11"/>
-              <path class="pin" d="M281 16c-15 0-27 12-27 27 0 20 27 47 27 47s27-27 27-47c0-15-12-27-27-27Z"/>
-              <circle class="pin-hole" cx="281" cy="43" r="8"/>
-            </svg>
+        </article>
+      </section>
+
+      <section class="stats" aria-label="Resumen de eventos">
+        <article class="stat primary-stat"><span>Total de excesos</span><strong id="eventCount">0</strong><small>eventos registrados</small></article>
+        <article class="stat"><span>Placas involucradas</span><strong id="plateCount">0</strong><small>vehículos</small></article>
+        <article class="stat"><span>Mayor velocidad</span><strong><b id="maxSpeed">0</b> <small>km/h</small></strong><small id="maxSpeedMeta">Sin registros</small></article>
+        <article class="stat"><span>Zona más frecuente</span><strong class="text-stat" id="topZone">—</strong><small id="topZoneCount">Sin registros</small></article>
+      </section>
+
+      <section class="records panel">
+        <div class="records-head">
+          <div><span class="section-kicker">TRAZABILIDAD</span><h2>Eventos de exceso de velocidad</h2></div>
+          <div class="filters">
+            <label class="search-box"><span class="sr-only">Buscar por placa, conductor o sector</span><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="searchInput" type="search" placeholder="Placa, conductor o sector..." /></label>
+            <label class="select-box"><span class="sr-only">Filtrar por zona</span><select id="zoneFilter"><option value="">Todas las zonas</option><option value="urbana">Zona urbana</option><option value="nacional">Vía nacional</option><option value="curvas">Curvas</option><option value="escolar">Escolar / residencial</option></select></label>
           </div>
-        </section>
-
-        <section class="stats" aria-label="Resumen de kilometraje">
-          <article class="stat-card primary-stat">
-            <span class="stat-icon" aria-hidden="true">↗</span>
-            <div><small>Total recorrido</small><strong><span id="totalKm">0</span> <b>km</b></strong></div>
-          </article>
-          <article class="stat-card">
-            <span class="stat-icon" aria-hidden="true">◷</span>
-            <div><small>Este mes</small><strong><span id="monthKm">0</span> <b>km</b></strong></div>
-          </article>
-          <article class="stat-card">
-            <span class="stat-icon" aria-hidden="true">◎</span>
-            <div><small>Recorridos</small><strong><span id="tripCount">0</span></strong></div>
-          </article>
-          <article class="stat-card">
-            <span class="stat-icon" aria-hidden="true">♙</span>
-            <div><small>Personas</small><strong><span id="personCount">0</span></strong></div>
-          </article>
-        </section>
-
-        <section class="workspace">
-          <article class="panel form-panel">
-            <div class="panel-heading">
-              <div>
-                <span class="section-number">01</span>
-                <h2>Nuevo recorrido</h2>
-              </div>
-              <p>Completa los datos del viaje.</p>
-            </div>
-
-            <form id="tripForm" novalidate>
-              <div class="field full-field">
-                <label for="person">Nombre de la persona <span>*</span></label>
-                <input id="person" name="person" type="text" placeholder="Ej. Carlos Ramírez" maxlength="60" autocomplete="name" required />
-                <span class="field-error" id="personError"></span>
-              </div>
-
-              <div class="field-grid">
-                <div class="field">
-                  <label for="date">Fecha <span>*</span></label>
-                  <input id="date" name="date" type="date" required />
-                  <span class="field-error" id="dateError"></span>
-                </div>
-                <div class="field">
-                  <label for="vehicle">Vehículo</label>
-                  <input id="vehicle" name="vehicle" type="text" placeholder="Ej. Camioneta 02" maxlength="40" />
-                </div>
-              </div>
-
-              <div class="field full-field">
-                <label for="route">Ruta o motivo</label>
-                <input id="route" name="route" type="text" placeholder="Ej. Bodega → Cliente" maxlength="80" />
-              </div>
-
-              <div class="odometer-grid">
-                <div class="field">
-                  <label for="startKm">Kilometraje inicial <span>*</span></label>
-                  <div class="input-with-unit"><input id="startKm" name="startKm" type="number" inputmode="decimal" min="0" step="0.1" placeholder="0" required /><span>km</span></div>
-                  <span class="field-error" id="startKmError"></span>
-                </div>
-                <span class="arrow" aria-hidden="true">→</span>
-                <div class="field">
-                  <label for="endKm">Kilometraje final <span>*</span></label>
-                  <div class="input-with-unit"><input id="endKm" name="endKm" type="number" inputmode="decimal" min="0" step="0.1" placeholder="0" required /><span>km</span></div>
-                  <span class="field-error" id="endKmError"></span>
-                </div>
-              </div>
-
-              <div class="calculation" aria-live="polite">
-                <span>Distancia calculada</span>
-                <strong><span id="calculatedKm">0</span> km</strong>
-              </div>
-
-              <button class="submit-button" type="submit">
-                Guardar recorrido
-                <span aria-hidden="true">＋</span>
-              </button>
-            </form>
-          </article>
-
-          <article class="panel history-panel">
-            <div class="panel-heading history-heading">
-              <div>
-                <span class="section-number">02</span>
-                <h2>Historial</h2>
-              </div>
-              <label class="search-box">
-                <span class="sr-only">Buscar registros</span>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
-                <input id="searchInput" type="search" placeholder="Buscar persona..." />
-              </label>
-            </div>
-
-            <div class="history-list" id="historyList"></div>
-
-            <div class="empty-state" id="emptyState">
-              <div class="empty-icon" aria-hidden="true">⌁</div>
-              <h3>Aún no hay recorridos</h3>
-              <p>Agrega el primer registro y aquí aparecerá todo el historial.</p>
-            </div>
-          </article>
-        </section>
-      </main>
-    </div>
-
-    <div class="toast" id="toast" role="status" aria-live="polite">Recorrido guardado</div>
-
-    <template id="tripTemplate">
-      <article class="trip-row">
-        <div class="avatar"></div>
-        <div class="trip-main">
-          <strong class="trip-person"></strong>
-          <span class="trip-meta"></span>
-          <span class="trip-route"></span>
         </div>
-        <div class="trip-distance"><strong></strong><span>km</span></div>
-        <button class="delete-button" type="button" aria-label="Eliminar recorrido" title="Eliminar recorrido">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg>
-        </button>
-      </article>
-    </template>
+        <div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Conductor / placa</th><th>Sector</th><th>Zona</th><th>Límite</th><th>Velocidad</th><th>Exceso</th><th></th></tr></thead><tbody id="eventsTable"></tbody></table></div>
+        <div class="empty-state" id="emptyState"><div>✓</div><h3>Sin excesos registrados</h3><p>Los eventos aparecerán aquí cuando una velocidad supere el límite activo.</p></div>
+      </section>
+      <section class="safety-note"><span>i</span><p><b>Uso preventivo:</b> la precisión depende del GPS del dispositivo. Mantén esta pantalla abierta durante el recorrido y no manipules el teléfono mientras conduces.</p></section>
+    </main>
 
+    <div class="overspeed-overlay" id="overspeedOverlay" role="alert" aria-live="assertive"><span class="warning-icon">!</span><div><b>REDUCE LA VELOCIDAD</b><small id="warningText">Has superado el límite permitido</small></div></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./app.js"></script>
   </body>
 </html>

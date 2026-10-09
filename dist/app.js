@@ -1,203 +1,68 @@
-const STORAGE_KEY = "kilometraje-registros-v1";
+const STORAGE_KEY="ruta-segura-eventos-v1",SETTINGS_KEY="ruta-segura-datos-v1";
+const ZONES={urbana:{name:"Zona urbana",limit:50,icon:"🏙️"},nacional:{name:"Vía nacional",limit:70,icon:"🛣️"},curvas:{name:"Curvas",limit:35,icon:"🌀"},escolar:{name:"Escolar / residencial",limit:30,icon:"🏫"}};
+const $=selector=>document.querySelector(selector),form=$("#monitorForm"),driverInput=$("#driver"),plateInput=$("#plate"),sectorInput=$("#sector"),startButton=$("#startButton"),eventsTable=$("#eventsTable"),emptyState=$("#emptyState"),searchInput=$("#searchInput"),zoneFilter=$("#zoneFilter"),exportButton=$("#exportButton");
+let events=readJson(STORAGE_KEY,[]),monitoring=false,watchId=null,lastPosition=null,activeBreachId=null,lastAlertAt=0,audioContext=null,toastTimer=null;
 
-const form = document.querySelector("#tripForm");
-const historyList = document.querySelector("#historyList");
-const emptyState = document.querySelector("#emptyState");
-const template = document.querySelector("#tripTemplate");
-const searchInput = document.querySelector("#searchInput");
-const exportButton = document.querySelector("#exportButton");
-const toast = document.querySelector("#toast");
+restoreSettings();renderAll();updateActiveZone();
 
-const fields = {
-  person: document.querySelector("#person"),
-  date: document.querySelector("#date"),
-  vehicle: document.querySelector("#vehicle"),
-  route: document.querySelector("#route"),
-  startKm: document.querySelector("#startKm"),
-  endKm: document.querySelector("#endKm"),
-};
+function readJson(key,fallback){try{return JSON.parse(localStorage.getItem(key)||"null")??fallback}catch{return fallback}}
+function currentZoneKey(){return document.querySelector('input[name="zone"]:checked').value}
+function currentZone(){return ZONES[currentZoneKey()]}
+function cleanPlate(value){return value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)}
+function displayPlate(value){return value.length>3?`${value.slice(0,3)} ${value.slice(3)}`:value}
+function formatNumber(value){return new Intl.NumberFormat("es-CO",{maximumFractionDigits:1}).format(value)}
+function restoreSettings(){const saved=readJson(SETTINGS_KEY,{});driverInput.value=saved.driver||"";plateInput.value=saved.plate?displayPlate(saved.plate):"";sectorInput.value=saved.sector||"";if(ZONES[saved.zone])document.querySelector(`input[name="zone"][value="${saved.zone}"]`).checked=true}
+function saveSettings(){localStorage.setItem(SETTINGS_KEY,JSON.stringify({driver:driverInput.value.trim(),plate:cleanPlate(plateInput.value),sector:sectorInput.value.trim(),zone:currentZoneKey()}))}
+function updateActiveZone(){const zone=currentZone();$("#activeZone").textContent=zone.name;$("#activeLimit").textContent=zone.limit;if(monitoring)saveSettings()}
 
-let trips = readTrips();
-let toastTimer;
+function validateForm(){let valid=true;$("#formMessage").textContent="";[driverInput,plateInput,sectorInput].forEach(input=>input.classList.remove("invalid"));if(!driverInput.value.trim()){driverInput.classList.add("invalid");valid=false}if(cleanPlate(plateInput.value).length<5){plateInput.classList.add("invalid");valid=false}if(!sectorInput.value.trim()){sectorInput.classList.add("invalid");valid=false}if(!valid)$("#formMessage").textContent="Completa conductor, placa y sector para iniciar.";return valid}
 
-fields.date.value = localDateValue(new Date());
-render();
+async function startMonitoring(){
+  if(!validateForm())return;
+  if(!navigator.geolocation){$("#formMessage").textContent="Este dispositivo no ofrece acceso a ubicación GPS.";return}
+  saveSettings();prepareAudio();
+  if("Notification" in window&&Notification.permission==="default"){try{await Notification.requestPermission()}catch{}}
+  monitoring=true;setMonitoringUi(true);
+  watchId=navigator.geolocation.watchPosition(handlePosition,handleLocationError,{enableHighAccuracy:true,maximumAge:1000,timeout:15000});
+}
+function stopMonitoring(){if(watchId!==null)navigator.geolocation.clearWatch(watchId);watchId=null;monitoring=false;lastPosition=null;activeBreachId=null;setSpeed(0);setMonitoringUi(false);setSafeStatus("Monitoreo detenido","Pulsa iniciar para volver a activar el GPS");$("#overspeedOverlay").classList.remove("show")}
+function setMonitoringUi(active){startButton.classList.toggle("stop",active);startButton.querySelector(".button-icon").textContent=active?"■":"▶";startButton.querySelector("span:last-child").textContent=active?"Detener monitoreo":"Iniciar monitoreo";$("#gpsState").textContent=active?"Buscando GPS…":"GPS inactivo";$("#gpsState").classList.toggle("active",active);$("#livePulse").parentElement.classList.toggle("active",active);$("#liveLabel").textContent=active?"Monitoreo activo":"Sin monitoreo";$("#systemState").lastChild.textContent=active?" Monitoreando":" Sistema listo";$("#liveDriver").textContent=active?driverInput.value.trim():"—";$("#livePlate").textContent=active?displayPlate(cleanPlate(plateInput.value)):"—";$("#liveSector").textContent=active?sectorInput.value.trim():"—";form.querySelectorAll("input").forEach(input=>{input.disabled=active})}
 
-function readTrips() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function handlePosition(position){$("#gpsState").textContent=`GPS ±${Math.round(position.coords.accuracy)} m`;let speed=Number.isFinite(position.coords.speed)&&position.coords.speed>=0?position.coords.speed*3.6:calculateSpeed(position);if(!Number.isFinite(speed)||speed<0)speed=0;speed=Math.min(speed,220);lastPosition=position;processSpeed(speed,position.coords)}
+function calculateSpeed(position){if(!lastPosition)return 0;const seconds=(position.timestamp-lastPosition.timestamp)/1000;if(seconds<=0||seconds>30)return 0;return haversine(lastPosition.coords.latitude,lastPosition.coords.longitude,position.coords.latitude,position.coords.longitude)/seconds*3.6}
+function haversine(lat1,lon1,lat2,lon2){const rad=value=>value*Math.PI/180,dLat=rad(lat2-lat1),dLon=rad(lon2-lon1),a=Math.sin(dLat/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;return 6371000*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a))}
+function processSpeed(speed,coords=null){const rounded=Math.round(speed*10)/10,zone=currentZone();setSpeed(rounded);if(rounded>zone.limit){setDangerStatus(rounded,zone.limit);registerOrUpdateBreach(rounded,coords);alertDriver(rounded,zone.limit)}else{activeBreachId=null;setSafeStatus("Velocidad segura","Estás dentro del límite permitido");$("#overspeedOverlay").classList.remove("show")}}
+function setSpeed(speed){$("#currentSpeed").textContent=Math.round(speed);const angle=-130+Math.min(speed,140)/140*260;$("#speedometer").style.setProperty("--speed-angle",`${angle}deg`)}
+function setSafeStatus(title,text){const banner=$("#statusBanner");banner.classList.remove("danger");banner.querySelector("span").textContent="✓";banner.querySelector("b").textContent=title;banner.querySelector("small").textContent=text}
+function setDangerStatus(speed,limit){const excess=speed-limit,banner=$("#statusBanner");banner.classList.add("danger");banner.querySelector("span").textContent="!";banner.querySelector("b").textContent="Exceso de velocidad";banner.querySelector("small").textContent=`${formatNumber(excess)} km/h por encima del límite`;$("#warningText").textContent=`Vas a ${formatNumber(speed)} km/h · límite ${limit} km/h`;$("#overspeedOverlay").classList.add("show")}
+
+function registerOrUpdateBreach(speed,coords){
+  const existing=activeBreachId&&events.find(event=>event.id===activeBreachId);
+  if(existing){if(speed>existing.speed)existing.speed=speed;existing.updatedAt=new Date().toISOString();if(coords){existing.latitude=coords.latitude;existing.longitude=coords.longitude}}
+  else{const zoneKey=currentZoneKey(),event={id:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`,timestamp:new Date().toISOString(),updatedAt:new Date().toISOString(),driver:driverInput.value.trim(),plate:cleanPlate(plateInput.value),sector:sectorInput.value.trim(),zone:zoneKey,limit:ZONES[zoneKey].limit,speed,latitude:coords?.latitude??null,longitude:coords?.longitude??null};events.unshift(event);activeBreachId=event.id}
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(events));renderAll();
 }
 
-function saveTrips() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
-}
+function prepareAudio(){if(!audioContext)audioContext=new(window.AudioContext||window.webkitAudioContext)();if(audioContext.state==="suspended")audioContext.resume()}
+function playAlarm(){prepareAudio();const now=audioContext.currentTime;[0,.22,.44].forEach(offset=>{const oscillator=audioContext.createOscillator(),gain=audioContext.createGain();oscillator.type="square";oscillator.frequency.setValueAtTime(880,now+offset);gain.gain.setValueAtTime(.0001,now+offset);gain.gain.exponentialRampToValueAtTime(.22,now+offset+.02);gain.gain.exponentialRampToValueAtTime(.0001,now+offset+.15);oscillator.connect(gain).connect(audioContext.destination);oscillator.start(now+offset);oscillator.stop(now+offset+.17)});if(navigator.vibrate)navigator.vibrate([180,100,180])}
+function alertDriver(speed,limit){const now=Date.now();if(now-lastAlertAt<5000)return;lastAlertAt=now;playAlarm();if("Notification" in window&&Notification.permission==="granted"&&document.hidden)new Notification("Reduce la velocidad",{body:`Vas a ${formatNumber(speed)} km/h. El límite es ${limit} km/h.`,tag:"ruta-segura-exceso",renotify:true})}
+function handleLocationError(error){const messages={1:"Permiso de ubicación denegado. Habilítalo en el navegador.",2:"No fue posible obtener la ubicación GPS.",3:"El GPS tardó demasiado en responder."};$("#formMessage").textContent=messages[error.code]||"Ocurrió un error con el GPS.";showToast(messages[error.code]||"Error de GPS");stopMonitoring()}
 
-function localDateValue(date) {
-  const offset = date.getTimezoneOffset();
-  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 10);
-}
+function renderAll(){renderStats();renderEvents();exportButton.disabled=events.length===0}
+function renderStats(){$("#eventCount").textContent=events.length;$("#plateCount").textContent=new Set(events.map(event=>event.plate)).size;if(!events.length){$("#maxSpeed").textContent="0";$("#maxSpeedMeta").textContent="Sin registros";$("#topZone").textContent="—";$("#topZoneCount").textContent="Sin registros";return}const fastest=events.reduce((max,event)=>event.speed>max.speed?event:max,events[0]);$("#maxSpeed").textContent=formatNumber(fastest.speed);$("#maxSpeedMeta").textContent=displayPlate(fastest.plate);const counts=events.reduce((all,event)=>({...all,[event.zone]:(all[event.zone]||0)+1}),{}),topKey=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];$("#topZone").textContent=ZONES[topKey]?.name||"—";$("#topZoneCount").textContent=`${counts[topKey]} ${counts[topKey]===1?"evento":"eventos"}`}
+function renderEvents(){const query=searchInput.value.trim().toLocaleLowerCase("es"),zone=zoneFilter.value,visible=events.filter(event=>`${event.driver} ${event.plate} ${event.sector}`.toLocaleLowerCase("es").includes(query)&&(!zone||event.zone===zone));eventsTable.replaceChildren();emptyState.classList.toggle("hidden",visible.length>0);emptyState.querySelector("h3").textContent=events.length&&!visible.length?"Sin coincidencias":"Sin excesos registrados";emptyState.querySelector("p").textContent=events.length&&!visible.length?"Prueba con otro filtro de búsqueda.":"Los eventos aparecerán aquí cuando una velocidad supere el límite activo.";visible.forEach(event=>eventsTable.append(createEventRow(event)))}
+function createEventRow(event){const row=document.createElement("tr"),date=new Date(event.timestamp),zone=ZONES[event.zone]||{name:event.zone,icon:"📍"};row.innerHTML=`<td><b>${escapeHtml(new Intl.DateTimeFormat("es-CO",{day:"2-digit",month:"short",year:"numeric"}).format(date))}</b><small>${escapeHtml(new Intl.DateTimeFormat("es-CO",{hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(date))}</small></td><td><b>${escapeHtml(event.driver)}</b><span class="plate-tag">${escapeHtml(displayPlate(event.plate))}</span></td><td><b>${escapeHtml(event.sector)}</b>${event.latitude!==null?`<small>${event.latitude.toFixed(5)}, ${event.longitude.toFixed(5)}</small>`:""}</td><td><span class="zone-tag">${zone.icon} ${escapeHtml(zone.name)}</span></td><td><b>${event.limit} km/h</b></td><td><span class="speed-cell">${formatNumber(event.speed)} km/h</span></td><td><span class="excess-tag">+${formatNumber(event.speed-event.limit)} km/h</span></td><td><button class="delete-button" type="button" aria-label="Eliminar evento" title="Eliminar evento"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg></button></td>`;row.querySelector("button").addEventListener("click",()=>removeEvent(event.id));return row}
+function escapeHtml(value){const div=document.createElement("div");div.textContent=String(value);return div.innerHTML}
+function removeEvent(id){const event=events.find(item=>item.id===id);if(!event||!confirm(`¿Eliminar el evento de la placa ${displayPlate(event.plate)}?`))return;events=events.filter(item=>item.id!==id);if(activeBreachId===id)activeBreachId=null;localStorage.setItem(STORAGE_KEY,JSON.stringify(events));renderAll();showToast("Evento eliminado")}
+function showToast(message){$("#toast").textContent=message;$("#toast").classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("#toast").classList.remove("show"),2800)}
 
-function distanceValue() {
-  const start = Number(fields.startKm.value);
-  const end = Number(fields.endKm.value);
-  return Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : 0;
-}
-
-function formatKm(value) {
-  return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 }).format(value);
-}
-
-function formatDate(value) {
-  return new Intl.DateTimeFormat("es-CO", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
-}
-
-function initials(name) {
-  return name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
-}
-
-function clearErrors() {
-  Object.values(fields).forEach(field => field.classList.remove("invalid"));
-  document.querySelectorAll(".field-error").forEach(node => { node.textContent = ""; });
-}
-
-function setError(name, message) {
-  fields[name].classList.add("invalid");
-  const node = document.querySelector(`#${name}Error`);
-  if (node) node.textContent = message;
-}
-
-function validate() {
-  clearErrors();
-  let valid = true;
-  const start = Number(fields.startKm.value);
-  const end = Number(fields.endKm.value);
-
-  if (!fields.person.value.trim()) { setError("person", "Escribe el nombre de la persona."); valid = false; }
-  if (!fields.date.value) { setError("date", "Selecciona una fecha."); valid = false; }
-  if (fields.startKm.value === "" || !Number.isFinite(start) || start < 0) { setError("startKm", "Ingresa un kilometraje válido."); valid = false; }
-  if (fields.endKm.value === "" || !Number.isFinite(end) || end < 0) { setError("endKm", "Ingresa un kilometraje válido."); valid = false; }
-  else if (Number.isFinite(start) && end <= start) { setError("endKm", "Debe ser mayor al kilometraje inicial."); valid = false; }
-
-  return valid;
-}
-
-function updateCalculation() {
-  document.querySelector("#calculatedKm").textContent = formatKm(distanceValue());
-  fields.startKm.classList.remove("invalid");
-  fields.endKm.classList.remove("invalid");
-  document.querySelector("#startKmError").textContent = "";
-  document.querySelector("#endKmError").textContent = "";
-}
-
-function render() {
-  renderStats();
-  renderHistory();
-  exportButton.disabled = trips.length === 0;
-}
-
-function renderStats() {
-  const total = trips.reduce((sum, trip) => sum + trip.distance, 0);
-  const now = new Date();
-  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const monthTotal = trips.filter(trip => trip.date.startsWith(monthPrefix)).reduce((sum, trip) => sum + trip.distance, 0);
-  const people = new Set(trips.map(trip => trip.person.trim().toLocaleLowerCase("es")));
-
-  document.querySelector("#totalKm").textContent = formatKm(total);
-  document.querySelector("#monthKm").textContent = formatKm(monthTotal);
-  document.querySelector("#tripCount").textContent = trips.length;
-  document.querySelector("#personCount").textContent = people.size;
-}
-
-function renderHistory() {
-  const query = searchInput.value.trim().toLocaleLowerCase("es");
-  const visible = trips
-    .filter(trip => [trip.person, trip.vehicle, trip.route].join(" ").toLocaleLowerCase("es").includes(query))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
-
-  historyList.replaceChildren();
-  emptyState.classList.toggle("hidden", visible.length > 0);
-  emptyState.querySelector("h3").textContent = trips.length && !visible.length ? "Sin resultados" : "Aún no hay recorridos";
-  emptyState.querySelector("p").textContent = trips.length && !visible.length
-    ? "Prueba con otro nombre, vehículo o ruta."
-    : "Agrega el primer registro y aquí aparecerá todo el historial.";
-
-  visible.forEach(trip => {
-    const row = template.content.firstElementChild.cloneNode(true);
-    row.dataset.id = trip.id;
-    row.querySelector(".avatar").textContent = initials(trip.person);
-    row.querySelector(".trip-person").textContent = trip.person;
-    row.querySelector(".trip-meta").textContent = [formatDate(trip.date), trip.vehicle].filter(Boolean).join(" · ");
-    row.querySelector(".trip-route").textContent = trip.route || "";
-    row.querySelector(".trip-distance strong").textContent = formatKm(trip.distance);
-    row.querySelector(".delete-button").addEventListener("click", () => removeTrip(trip.id));
-    historyList.append(row);
-  });
-}
-
-function removeTrip(id) {
-  const trip = trips.find(item => item.id === id);
-  if (!trip || !window.confirm(`¿Eliminar el recorrido de ${trip.person}?`)) return;
-  trips = trips.filter(item => item.id !== id);
-  saveTrips();
-  render();
-  showToast("Recorrido eliminado");
-}
-
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
-}
-
-form.addEventListener("submit", event => {
-  event.preventDefault();
-  if (!validate()) {
-    form.querySelector(".invalid")?.focus();
-    return;
-  }
-
-  trips.push({
-    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-    person: fields.person.value.trim(),
-    date: fields.date.value,
-    vehicle: fields.vehicle.value.trim(),
-    route: fields.route.value.trim(),
-    startKm: Number(fields.startKm.value),
-    endKm: Number(fields.endKm.value),
-    distance: distanceValue(),
-    createdAt: Date.now(),
-  });
-
-  saveTrips();
-  form.reset();
-  fields.date.value = localDateValue(new Date());
-  updateCalculation();
-  render();
-  fields.person.focus();
-  showToast("Recorrido guardado correctamente");
-});
-
-[fields.startKm, fields.endKm].forEach(field => field.addEventListener("input", updateCalculation));
-fields.person.addEventListener("input", () => { fields.person.classList.remove("invalid"); document.querySelector("#personError").textContent = ""; });
-fields.date.addEventListener("input", () => { fields.date.classList.remove("invalid"); document.querySelector("#dateError").textContent = ""; });
-searchInput.addEventListener("input", renderHistory);
-
-exportButton.addEventListener("click", () => {
-  if (!trips.length) return;
-  const header = ["Persona", "Fecha", "Vehículo", "Ruta o motivo", "Km inicial", "Km final", "Distancia (km)"];
-  const rows = trips.map(trip => [trip.person, trip.date, trip.vehicle, trip.route, trip.startKm, trip.endKm, trip.distance]);
-  const csv = [header, ...rows].map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
-  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `kilometraje-${localDateValue(new Date())}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
-  showToast("Archivo CSV descargado");
-});
+form.addEventListener("submit",async event=>{event.preventDefault();if(monitoring)stopMonitoring();else await startMonitoring()});
+plateInput.addEventListener("input",()=>{const cursorAtEnd=plateInput.selectionStart===plateInput.value.length;plateInput.value=displayPlate(cleanPlate(plateInput.value));if(cursorAtEnd)plateInput.setSelectionRange(plateInput.value.length,plateInput.value.length)});
+document.querySelectorAll('input[name="zone"]').forEach(input=>input.addEventListener("change",updateActiveZone));
+[driverInput,plateInput,sectorInput].forEach(input=>input.addEventListener("input",()=>{input.classList.remove("invalid");$("#formMessage").textContent=""}));
+searchInput.addEventListener("input",renderEvents);zoneFilter.addEventListener("change",renderEvents);
+$("#testAlertButton").addEventListener("click",async()=>{prepareAudio();playAlarm();if("Notification" in window&&Notification.permission==="default"){try{await Notification.requestPermission()}catch{}}showToast("Alarma probada correctamente")});
+const simulateEventButton=$("#simulateEventButton");
+if(new URLSearchParams(location.search).has("demo"))simulateEventButton.hidden=false;
+simulateEventButton.addEventListener("click",()=>{if(!validateForm())return;saveSettings();processSpeed(currentZone().limit+12,{latitude:4.711,longitude:-74.0721});showToast("Evento de prueba registrado")});
+exportButton.addEventListener("click",()=>{const header=["Fecha","Hora","Conductor","Placa","Sector","Zona","Límite km/h","Velocidad km/h","Exceso km/h","Latitud","Longitud"],rows=events.map(event=>{const date=new Date(event.timestamp);return[date.toLocaleDateString("es-CO"),date.toLocaleTimeString("es-CO"),event.driver,displayPlate(event.plate),event.sector,ZONES[event.zone]?.name||event.zone,event.limit,event.speed,Math.round((event.speed-event.limit)*10)/10,event.latitude??"",event.longitude??""]}),csv=[header,...rows].map(row=>row.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`eventos-velocidad-${new Date().toISOString().slice(0,10)}.csv`;link.click();URL.revokeObjectURL(url);showToast("Reporte CSV descargado")});
