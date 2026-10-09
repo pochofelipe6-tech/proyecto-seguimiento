@@ -4,6 +4,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null default '',
+  cedula text unique check (cedula ~ '^[0-9]{6,15}$'),
   role text not null default 'driver' check (role in ('driver', 'admin')),
   created_at timestamptz not null default now()
 );
@@ -11,8 +12,9 @@ create table if not exists public.profiles (
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', ''));
+  insert into public.profiles (id, full_name, cedula)
+  values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', ''),
+    nullif(new.raw_user_meta_data ->> 'cedula', ''));
   return new;
 end;
 $$;
@@ -184,12 +186,27 @@ begin
 end;
 $$;
 
+create or replace function public.set_user_role(p_user_id uuid, p_role text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo un administrador puede asignar roles'; end if;
+  if p_role not in ('driver', 'admin') then raise exception 'Rol inválido'; end if;
+  if p_user_id = (select auth.uid()) and p_role <> 'admin' then
+    raise exception 'No puedes quitarte tu propio rol de administrador';
+  end if;
+  update public.profiles set role = p_role where id = p_user_id;
+  if not found then raise exception 'Usuario no encontrado'; end if;
+end;
+$$;
+
 revoke all on function public.start_trip(uuid,text,text) from public;
 revoke all on function public.record_position(uuid,double precision,double precision,numeric,numeric) from public;
 revoke all on function public.finish_trip(uuid) from public;
+revoke all on function public.set_user_role(uuid,text) from public;
 grant execute on function public.start_trip(uuid,text,text) to authenticated;
 grant execute on function public.record_position(uuid,double precision,double precision,numeric,numeric) to authenticated;
 grant execute on function public.finish_trip(uuid) to authenticated;
+grant execute on function public.set_user_role(uuid,text) to authenticated;
 
 do $$ begin
   alter publication supabase_realtime add table public.trips;

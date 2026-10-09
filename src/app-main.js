@@ -13,9 +13,11 @@ const supabase = configuredUrl && configuredKey ? createClient(configuredUrl, co
 let user, profile, activeTrip, watchId, watchKind, map, mapLayer, routeLayer, channel;
 let lastSent = 0, lastAlarm = 0, refreshTimer, audioContext;
 let adminTrips = [], adminVehicles = [], adminProfiles = [], adminAlerts = [];
+let registrationReady = false;
 
 function show(view) {
   for (const id of ["setupView", "loginView", "driverView", "adminView"]) $(id).hidden = id !== view;
+  $("registrationPanel").hidden = view !== "adminView";
   $("sessionBar").hidden = view === "loginView" || view === "setupView";
 }
 function message(id, text, error = false) { $(id).textContent = text; $(id).classList.toggle("error", error); }
@@ -151,6 +153,9 @@ function renderAdmin() {
   $("alertCount").textContent = active.filter((t) => t.has_alert).length;
   $("updateTime").textContent = new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
   $("tableSummary").textContent = `${active.length} vehículos`;
+  $("profileRows").innerHTML = adminProfiles.length
+    ? adminProfiles.map((p) => `<tr><td>${clean(p.full_name || "—")}</td><td>${clean(p.cedula || "—")}</td><td>${p.role === "admin" ? "Administrador" : "Conductor"}</td></tr>`).join("")
+    : '<tr><td colspan="3">No hay usuarios registrados.</td></tr>';
   $("tripRows").innerHTML = active.length ? active.map((t) => `<tr data-trip="${t.id}"><td><b>${clean(vehicles[t.vehicle_id]?.plate || "—")}</b></td><td>${clean(profiles[t.driver_id]?.full_name || "—")}</td><td>${clean(t.sector)}<br><small>${zoneNames[t.zone] || t.zone} · ${t.speed_limit} km/h · ${Number(t.distance_km || 0).toFixed(2)} km</small></td><td>${t.last_speed == null ? "—" : `${Math.round(t.last_speed)} km/h`}</td><td>${date(t.last_seen_at)}</td><td>${t.has_alert ? '<span class="alert-tag">Exceso de velocidad</span>' : ""}</td></tr>`).join("") : '<tr><td colspan="6">No hay vehículos en ruta.</td></tr>';
   $("tripRows").querySelectorAll("tr[data-trip]").forEach((row) => row.addEventListener("click", () => selectTrip(row.dataset.trip).catch((e) => message("adminMessage", e.message, true))));
   $("alertRows").innerHTML = adminAlerts.length ? adminAlerts.map((a) => { const t = adminTrips.find((x) => x.id === a.trip_id); return `<tr><td>${date(a.occurred_at)}</td><td>${clean(vehicles[t?.vehicle_id]?.plate || "—")}</td><td>${clean(profiles[t?.driver_id]?.full_name || "—")}</td><td>${clean(a.sector)} / ${zoneNames[a.zone] || clean(a.zone)}</td><td>${Math.round(a.peak_speed_kmh)} km/h</td><td>${a.limit_kmh} km/h</td></tr>`; }).join("") : '<tr><td colspan="6">No se han generado alertas.</td></tr>';
@@ -169,10 +174,20 @@ async function refreshAdmin() {
     const [trips, vehicles, profiles, alerts] = await Promise.all([
       supabase.from("trips").select("*").order("started_at", { ascending: false }).limit(500),
       supabase.from("vehicles").select("*"),
-      supabase.from("profiles").select("id,full_name,role").order("full_name"),
+      supabase.from("profiles").select("id,full_name,cedula,role").order("full_name"),
       supabase.from("speed_alerts").select("*").order("occurred_at", { ascending: false }).limit(50),
     ]);
-    adminTrips = failure(trips); adminVehicles = failure(vehicles); adminProfiles = failure(profiles); adminAlerts = failure(alerts);
+    let profileData;
+    if (profiles.error && /cedula|column/i.test(profiles.error.message || "")) {
+      profileData = failure(await supabase.from("profiles").select("id,full_name,role").order("full_name"));
+      registrationReady = false;
+      message("registrationMessage", "Para activar el registro, ejecuta supabase/migrations/002_registro_usuarios.sql en SQL Editor.", true);
+    } else {
+      profileData = failure(profiles);
+      registrationReady = true;
+      message("registrationMessage", "");
+    }
+    adminTrips = failure(trips); adminVehicles = failure(vehicles); adminProfiles = profileData; adminAlerts = failure(alerts);
     $("vehicleDriver").innerHTML = '<option value="">Selecciona un conductor</option>' + adminProfiles.filter((p) => p.role === "driver").map((p) => `<option value="${p.id}">${clean(p.full_name || p.id)}</option>`).join("");
     renderAdmin(); message("adminMessage", "");
   } catch (err) { message("adminMessage", `Error al actualizar: ${err.message}`, true); }
@@ -187,6 +202,40 @@ $("vehicleForm").addEventListener("submit", async (event) => {
     failure(await supabase.from("vehicles").insert({ plate, label: $("vehicleLabel").value.trim(), driver_id: $("vehicleDriver").value }));
     $("vehicleForm").reset(); message("vehicleMessage", "Vehículo guardado."); await refreshAdmin();
   } catch (err) { message("vehicleMessage", err.message, true); }
+});
+
+$("registrationForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (profile?.role !== "admin") return message("registrationMessage", "Solo un administrador puede registrar usuarios.", true);
+  if (!registrationReady) return message("registrationMessage", "Primero ejecuta la migración SQL del módulo de registro.", true);
+  const button = $("registrationForm").querySelector('button[type="submit"]');
+  const fullName = $("registerName").value.trim();
+  const cedula = $("registerCedula").value.trim();
+  const email = $("registerEmail").value.trim().toLowerCase();
+  const password = $("registerPassword").value;
+  const role = $("registerRole").value;
+  if (fullName.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
+    return message("registrationMessage", "Revisa el nombre, la cédula y la contraseña (mínimo 8 caracteres).", true);
+  }
+  button.disabled = true; message("registrationMessage", "Registrando usuario...");
+  try {
+    // Cliente aislado: el registro no reemplaza la sesión del administrador.
+    const registrationClient = createClient(configuredUrl, configuredKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await registrationClient.auth.signUp({
+      email, password, options: { data: { full_name: fullName, cedula } },
+    });
+    if (error) throw error;
+    if (!data.user || data.user.identities?.length === 0) throw new Error("No se pudo confirmar el registro. Revisa si el correo ya existe.");
+    if (role === "admin") failure(await supabase.rpc("set_user_role", { p_user_id: data.user.id, p_role: "admin" }));
+    $("registrationForm").reset(); await refreshAdmin();
+    message("registrationMessage", data.session
+      ? "Usuario registrado. Ya puede iniciar sesión."
+      : "Usuario registrado. Debe confirmar su correo antes de iniciar sesión.");
+  } catch (err) {
+    message("registrationMessage", `No se completó el registro: ${err.message}. Si el usuario se creó, revisa su rol en la tabla.`, true);
+  } finally { button.disabled = false; }
 });
 
 async function loadSession() {

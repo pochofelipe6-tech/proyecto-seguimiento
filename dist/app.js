@@ -22154,8 +22154,10 @@
   var adminVehicles = [];
   var adminProfiles = [];
   var adminAlerts = [];
+  var registrationReady = false;
   function show(view) {
     for (const id of ["setupView", "loginView", "driverView", "adminView"]) $(id).hidden = id !== view;
+    $("registrationPanel").hidden = view !== "adminView";
     $("sessionBar").hidden = view === "loginView" || view === "setupView";
   }
   function message(id, text, error = false) {
@@ -22350,6 +22352,7 @@
     $("alertCount").textContent = active.filter((t) => t.has_alert).length;
     $("updateTime").textContent = (/* @__PURE__ */ new Date()).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
     $("tableSummary").textContent = "".concat(active.length, " veh\xEDculos");
+    $("profileRows").innerHTML = adminProfiles.length ? adminProfiles.map((p) => "<tr><td>".concat(clean(p.full_name || "\u2014"), "</td><td>").concat(clean(p.cedula || "\u2014"), "</td><td>").concat(p.role === "admin" ? "Administrador" : "Conductor", "</td></tr>")).join("") : '<tr><td colspan="3">No hay usuarios registrados.</td></tr>';
     $("tripRows").innerHTML = active.length ? active.map((t) => {
       var _a4, _b2;
       return '<tr data-trip="'.concat(t.id, '"><td><b>').concat(clean(((_a4 = vehicles[t.vehicle_id]) == null ? void 0 : _a4.plate) || "\u2014"), "</b></td><td>").concat(clean(((_b2 = profiles[t.driver_id]) == null ? void 0 : _b2.full_name) || "\u2014"), "</td><td>").concat(clean(t.sector), "<br><small>").concat(zoneNames[t.zone] || t.zone, " \xB7 ").concat(t.speed_limit, " km/h \xB7 ").concat(Number(t.distance_km || 0).toFixed(2), " km</small></td><td>").concat(t.last_speed == null ? "\u2014" : "".concat(Math.round(t.last_speed), " km/h"), "</td><td>").concat(date(t.last_seen_at), "</td><td>").concat(t.has_alert ? '<span class="alert-tag">Exceso de velocidad</span>' : "", "</td></tr>");
@@ -22376,12 +22379,22 @@
       const [trips, vehicles, profiles, alerts] = await Promise.all([
         supabase.from("trips").select("*").order("started_at", { ascending: false }).limit(500),
         supabase.from("vehicles").select("*"),
-        supabase.from("profiles").select("id,full_name,role").order("full_name"),
+        supabase.from("profiles").select("id,full_name,cedula,role").order("full_name"),
         supabase.from("speed_alerts").select("*").order("occurred_at", { ascending: false }).limit(50)
       ]);
+      let profileData;
+      if (profiles.error && /cedula|column/i.test(profiles.error.message || "")) {
+        profileData = failure(await supabase.from("profiles").select("id,full_name,role").order("full_name"));
+        registrationReady = false;
+        message("registrationMessage", "Para activar el registro, ejecuta supabase/migrations/002_registro_usuarios.sql en SQL Editor.", true);
+      } else {
+        profileData = failure(profiles);
+        registrationReady = true;
+        message("registrationMessage", "");
+      }
       adminTrips = failure(trips);
       adminVehicles = failure(vehicles);
-      adminProfiles = failure(profiles);
+      adminProfiles = profileData;
       adminAlerts = failure(alerts);
       $("vehicleDriver").innerHTML = '<option value="">Selecciona un conductor</option>' + adminProfiles.filter((p) => p.role === "driver").map((p) => '<option value="'.concat(p.id, '">').concat(clean(p.full_name || p.id), "</option>")).join("");
       renderAdmin();
@@ -22406,6 +22419,43 @@
       await refreshAdmin();
     } catch (err) {
       message("vehicleMessage", err.message, true);
+    }
+  });
+  $("registrationForm").addEventListener("submit", async (event) => {
+    var _a3;
+    event.preventDefault();
+    if ((profile == null ? void 0 : profile.role) !== "admin") return message("registrationMessage", "Solo un administrador puede registrar usuarios.", true);
+    if (!registrationReady) return message("registrationMessage", "Primero ejecuta la migraci\xF3n SQL del m\xF3dulo de registro.", true);
+    const button = $("registrationForm").querySelector('button[type="submit"]');
+    const fullName = $("registerName").value.trim();
+    const cedula = $("registerCedula").value.trim();
+    const email = $("registerEmail").value.trim().toLowerCase();
+    const password = $("registerPassword").value;
+    const role = $("registerRole").value;
+    if (fullName.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
+      return message("registrationMessage", "Revisa el nombre, la c\xE9dula y la contrase\xF1a (m\xEDnimo 8 caracteres).", true);
+    }
+    button.disabled = true;
+    message("registrationMessage", "Registrando usuario...");
+    try {
+      const registrationClient = createClient(configuredUrl, configuredKey, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+      });
+      const { data, error } = await registrationClient.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName, cedula } }
+      });
+      if (error) throw error;
+      if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("No se pudo confirmar el registro. Revisa si el correo ya existe.");
+      if (role === "admin") failure(await supabase.rpc("set_user_role", { p_user_id: data.user.id, p_role: "admin" }));
+      $("registrationForm").reset();
+      await refreshAdmin();
+      message("registrationMessage", data.session ? "Usuario registrado. Ya puede iniciar sesi\xF3n." : "Usuario registrado. Debe confirmar su correo antes de iniciar sesi\xF3n.");
+    } catch (err) {
+      message("registrationMessage", "No se complet\xF3 el registro: ".concat(err.message, ". Si el usuario se cre\xF3, revisa su rol en la tabla."), true);
+    } finally {
+      button.disabled = false;
     }
   });
   async function loadSession() {

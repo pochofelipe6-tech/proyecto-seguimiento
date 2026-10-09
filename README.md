@@ -16,6 +16,10 @@ Aplicación Android (Capacitor) con dos roles: conductor y administrador. Usa Su
 4. Copia **Project URL** y la clave **publishable** en `.env.local`. Nunca uses la clave `service_role` dentro de la app.
 5. Ejecuta `npm install` y `npm run android:apk`. La salida está en `Ruta-Segura.apk`. Para web, ejecuta `npm run build:web` y sirve `dist/` con HTTPS para acceder al GPS.
 
+### Registro de usuarios
+
+El administrador dispone de un módulo para registrar nombre completo, cédula, correo, contraseña inicial y rol (conductor o administrador). El correo y la contraseña se guardan en Supabase Auth; nombre, cédula y rol se guardan en `public.profiles`. Si tu proyecto ya ejecutó el `schema.sql` anterior, pega y ejecuta **solo** [002_registro_usuarios.sql](supabase/migrations/002_registro_usuarios.sql) en SQL Editor. Para proyectos nuevos, el `schema.sql` ya incluye el módulo. Si Supabase tiene activada la confirmación de correo, el usuario deberá confirmar su email antes de iniciar sesión.
+
 El administrador puede dar de alta una placa y asignarla a una cuenta de conductor. El conductor inicia una ruta, acepta el permiso de ubicación y mantiene la app abierta. El GPS envía coordenadas y velocidad aproximadamente cada 4 segundos. El servidor guarda las posiciones en `positions`, el estado y kilometraje acumulado en `trips` y cada episodio de exceso en `speed_alerts`. Una alerta continúa actualizando su velocidad máxima mientras el vehículo siga sobre el límite; al volver al límite y superarlo de nuevo, se crea otro evento. La tabla de rutas deja vacía la celda de alerta si esa ruta no registró excesos.
 
 Las tablas tienen políticas RLS: el administrador puede ver la flota, y el conductor solo sus rutas y vehículo asignado. Las escrituras de posiciones y alertas se hacen por funciones SQL que validan al conductor autenticado. El mapa se actualiza con Supabase Realtime y tiene un botón de actualización manual.
