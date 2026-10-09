@@ -6,7 +6,7 @@ La versión web usa Next.js App Router. En `.env.local`, coloca `NEXT_PUBLIC_SUP
 
 Ejecuta `npm install`, `npm run dev` y abre `http://localhost:3000`. Para producción, usa `npm run build` y `npm run start`. El proyecto Android/Capacitor y su compilación con `npm run android:apk` continúan disponibles por separado.
 
-Aplicación Android (Capacitor) con dos roles: conductor y administrador. Usa Supabase para autenticación, registro de rutas y alertas, y Leaflet/OpenStreetMap para el mapa.
+Aplicación Android (Capacitor) con roles de conductor, auxiliar de ruta, responsable de ruta y administrador. Usa Supabase para autenticación, registro de rutas y alertas, y Leaflet/OpenStreetMap para el mapa.
 
 ## Configurar Supabase
 
@@ -18,9 +18,9 @@ Aplicación Android (Capacitor) con dos roles: conductor y administrador. Usa Su
 
 ### Registro de usuarios
 
-La pantalla de acceso incluye **Crear cuenta de conductor** con nombre, cédula y contraseña; no se solicita correo. El rol inicial siempre es `driver`: nadie puede darse acceso de administrador desde el registro público. El administrador también puede registrar usuarios y asignar los roles conductor o administrador. La app crea internamente un identificador de Supabase Auth a partir de la cédula; no es un buzón real. La contraseña queda en Supabase Auth; nombre, cédula y rol se guardan en `public.profiles`. Las cuentas anteriores que usaban correo todavía pueden ingresar escribiéndolo en el campo de cédula.
+La pantalla de acceso incluye **Crear cuenta de conductor** con nombre, cédula y contraseña; no se solicita correo. El rol inicial siempre es `driver`: nadie puede darse acceso de administrador desde el registro público. El administrador puede registrar usuarios como conductor, auxiliar de ruta, responsable de ruta o administrador, y cambiar después su rol desde la tabla de usuarios. Los roles auxiliar y responsable quedan registrados, pero por ahora tienen una pantalla de cuenta sin acceso al GPS ni al panel administrativo. La app crea internamente un identificador de Supabase Auth a partir de la cédula; no es un buzón real. La contraseña queda en Supabase Auth; nombre, cédula y rol se guardan en `public.profiles`. Las cuentas anteriores que usaban correo todavía pueden ingresar escribiéndolo en el campo de cédula.
 
-**Configuración necesaria:** en Supabase, ve a Authentication → Sign In / Providers → Email y desactiva **Confirm Email**. La app bloquea registros sin correo mientras esa opción esté activada. Sin un correo real no habrá recuperación de contraseña por email; un administrador tendrá que gestionar el restablecimiento. Si tu proyecto ya ejecutó el `schema.sql` anterior, pega y ejecuta **solo** [002_registro_usuarios.sql](supabase/migrations/002_registro_usuarios.sql) en SQL Editor. Para proyectos nuevos, `schema.sql` ya incluye el módulo.
+**Configuración necesaria:** en Supabase, ve a Authentication → Sign In / Providers → Email y desactiva **Confirm Email**; guarda el cambio. La app no puede modificar ese ajuste con la clave pública y bloquea registros sin correo mientras esté activado. Sin un correo real no habrá recuperación de contraseña por email; un administrador tendrá que gestionar el restablecimiento. Si tu proyecto ya ejecutó el `schema.sql` anterior, aplica [002_registro_usuarios.sql](supabase/migrations/002_registro_usuarios.sql) si aún falta y luego [003_roles_ruta.sql](supabase/migrations/003_roles_ruta.sql) en SQL Editor. Para proyectos nuevos, `schema.sql` ya incluye ambos cambios.
 
 El administrador puede dar de alta una placa y asignarla a una cuenta de conductor. El conductor inicia una ruta, acepta el permiso de ubicación y mantiene la app abierta. El GPS envía coordenadas y velocidad aproximadamente cada 4 segundos. El servidor guarda las posiciones en `positions`, el estado y kilometraje acumulado en `trips` y cada episodio de exceso en `speed_alerts`. Una alerta continúa actualizando su velocidad máxima mientras el vehículo siga sobre el límite; al volver al límite y superarlo de nuevo, se crea otro evento. La tabla de rutas deja vacía la celda de alerta si esa ruta no registró excesos.
 

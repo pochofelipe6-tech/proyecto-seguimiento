@@ -11,6 +11,8 @@ const configuredUrl = window.RutaSeguraConfig?.url || SUPABASE_URL;
 const configuredKey = window.RutaSeguraConfig?.anonKey || SUPABASE_ANON_KEY;
 const supabase = configuredUrl && configuredKey ? createClient(configuredUrl, configuredKey) : null;
 const emailForCedula = (cedula) => `cedula-${cedula}@rutasegura.invalid`;
+const roleNames = { driver: "Conductor", assistant: "Auxiliar de ruta", route_manager: "Responsable de ruta", admin: "Administrador" };
+const roleOptions = Object.entries(roleNames).map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
 async function requireCedulaOnlyAuth() {
   const response = await fetch(`${configuredUrl}/auth/v1/settings`, { headers: { apikey: configuredKey } });
   if (!response.ok) throw new Error("No se pudo verificar la configuración de registro de Supabase.");
@@ -25,7 +27,7 @@ let adminTrips = [], adminVehicles = [], adminProfiles = [], adminAlerts = [];
 let registrationReady = false;
 
 function show(view) {
-  for (const id of ["setupView", "loginView", "signupView", "driverView", "adminView"]) $(id).hidden = id !== view;
+  for (const id of ["setupView", "loginView", "signupView", "driverView", "staffView", "adminView"]) $(id).hidden = id !== view;
   $("registrationPanel").hidden = view !== "adminView";
   $("sessionBar").hidden = view === "loginView" || view === "signupView" || view === "setupView";
 }
@@ -163,8 +165,9 @@ function renderAdmin() {
   $("updateTime").textContent = new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
   $("tableSummary").textContent = `${active.length} vehículos`;
   $("profileRows").innerHTML = adminProfiles.length
-    ? adminProfiles.map((p) => `<tr><td>${clean(p.full_name || "—")}</td><td>${clean(p.cedula || "—")}</td><td>${p.role === "admin" ? "Administrador" : "Conductor"}</td></tr>`).join("")
-    : '<tr><td colspan="3">No hay usuarios registrados.</td></tr>';
+    ? adminProfiles.map((p) => `<tr><td>${clean(p.full_name || "—")}</td><td>${clean(p.cedula || "—")}</td><td>${clean(roleNames[p.role] || p.role)}</td><td><select aria-label="Nuevo rol para ${clean(p.full_name || p.cedula || "usuario")}" data-role-user="${p.id}" ${p.id === user.id ? "disabled" : ""}>${roleOptions}</select><button type="button" data-save-role="${p.id}" ${p.id === user.id ? "disabled" : ""}>Guardar</button></td></tr>`).join("")
+    : '<tr><td colspan="4">No hay usuarios registrados.</td></tr>';
+  $("profileRows").querySelectorAll("select[data-role-user]").forEach((select) => { select.value = adminProfiles.find((p) => p.id === select.dataset.roleUser)?.role || "driver"; });
   $("tripRows").innerHTML = active.length ? active.map((t) => `<tr data-trip="${t.id}"><td><b>${clean(vehicles[t.vehicle_id]?.plate || "—")}</b></td><td>${clean(profiles[t.driver_id]?.full_name || "—")}</td><td>${clean(t.sector)}<br><small>${zoneNames[t.zone] || t.zone} · ${t.speed_limit} km/h · ${Number(t.distance_km || 0).toFixed(2)} km</small></td><td>${t.last_speed == null ? "—" : `${Math.round(t.last_speed)} km/h`}</td><td>${date(t.last_seen_at)}</td><td>${t.has_alert ? '<span class="alert-tag">Exceso de velocidad</span>' : ""}</td></tr>`).join("") : '<tr><td colspan="6">No hay vehículos en ruta.</td></tr>';
   $("tripRows").querySelectorAll("tr[data-trip]").forEach((row) => row.addEventListener("click", () => selectTrip(row.dataset.trip).catch((e) => message("adminMessage", e.message, true))));
   $("alertRows").innerHTML = adminAlerts.length ? adminAlerts.map((a) => { const t = adminTrips.find((x) => x.id === a.trip_id); return `<tr><td>${date(a.occurred_at)}</td><td>${clean(vehicles[t?.vehicle_id]?.plate || "—")}</td><td>${clean(profiles[t?.driver_id]?.full_name || "—")}</td><td>${clean(a.sector)} / ${zoneNames[a.zone] || clean(a.zone)}</td><td>${Math.round(a.peak_speed_kmh)} km/h</td><td>${a.limit_kmh} km/h</td></tr>`; }).join("") : '<tr><td colspan="6">No se han generado alertas.</td></tr>';
@@ -203,6 +206,22 @@ async function refreshAdmin() {
 }
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refreshAdmin, 800); }
 $("refreshButton").addEventListener("click", refreshAdmin);
+$("registerRole").innerHTML = roleOptions;
+$("registrationPanel").querySelector("thead tr").innerHTML = "<th>Nombre</th><th>Cédula</th><th>Rol actual</th><th>Cambiar rol</th>";
+$("profileRows").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-save-role]");
+  if (!button || profile?.role !== "admin") return;
+  const target = adminProfiles.find((p) => p.id === button.dataset.saveRole);
+  const nextRole = $("profileRows").querySelector(`select[data-role-user="${button.dataset.saveRole}"]`)?.value;
+  if (!target || !roleNames[nextRole] || target.id === user.id) return;
+  if (target.role === nextRole) return message("registrationMessage", "El usuario ya tiene ese rol.");
+  button.disabled = true;
+  try {
+    failure(await supabase.rpc("set_user_role", { p_user_id: target.id, p_role: nextRole }));
+    await refreshAdmin();
+    message("registrationMessage", `Rol de ${target.full_name || target.cedula} actualizado a ${roleNames[nextRole]}.`);
+  } catch (err) { message("registrationMessage", `No se pudo cambiar el rol: ${err.message}. Ejecuta la migración 003_roles_ruta.sql si falta.`, true); button.disabled = false; }
+});
 $("vehicleForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -238,7 +257,7 @@ $("registrationForm").addEventListener("submit", async (event) => {
     });
     if (error) throw error;
     if (!data.user || data.user.identities?.length === 0) throw new Error("Esa cédula ya tiene una cuenta.");
-    if (role === "admin") failure(await supabase.rpc("set_user_role", { p_user_id: data.user.id, p_role: "admin" }));
+    if (role !== "driver") failure(await supabase.rpc("set_user_role", { p_user_id: data.user.id, p_role: role }));
     $("registrationForm").reset(); await refreshAdmin();
     message("registrationMessage", data.session
       ? "Usuario registrado. Ya puede ingresar con su cédula."
@@ -259,7 +278,8 @@ async function loadSession() {
       show("adminView"); ensureMap(); await refreshAdmin();
       if (channel) supabase.removeChannel(channel);
       channel = supabase.channel("control-rutas").on("postgres_changes", { event: "*", schema: "public", table: "trips" }, scheduleRefresh).on("postgres_changes", { event: "*", schema: "public", table: "speed_alerts" }, scheduleRefresh).subscribe();
-    } else { show("driverView"); await loadDriver(); }
+    } else if (profile.role === "driver") { show("driverView"); await loadDriver(); }
+    else { $("staffTitle").textContent = roleNames[profile.role] || "Personal de ruta"; show("staffView"); }
   } catch (err) { show("loginView"); message("loginError", `No se pudo cargar el perfil: ${err.message}`, true); }
 }
 $("loginForm").addEventListener("submit", async (event) => {
