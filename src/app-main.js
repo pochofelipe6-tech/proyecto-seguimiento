@@ -312,6 +312,9 @@ async function loadSession() {
     } else {
       $("driverView").querySelector(".eyebrow").textContent = "PANEL DE SEGUIMIENTO";
       show("driverView"); await loadDriver();
+      if (user.email?.toLowerCase() === "administrador@gmail.com") {
+        message("driverMessage", "Esta cuenta aún tiene rol de usuario. Ejecuta supabase/crear_admin.sql en el SQL Editor de Supabase y recarga la aplicación.", true);
+      }
     }
   } catch (err) { show("loginView"); message("loginError", `No se pudo cargar el perfil: ${err.message}`, true); }
 }

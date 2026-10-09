@@ -22509,6 +22509,7 @@
     }
   });
   async function loadSession() {
+    var _a3;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       show("loginView");
@@ -22528,6 +22529,9 @@
         $("driverView").querySelector(".eyebrow").textContent = "PANEL DE SEGUIMIENTO";
         show("driverView");
         await loadDriver();
+        if (((_a3 = user.email) == null ? void 0 : _a3.toLowerCase()) === "administrador@gmail.com") {
+          message("driverMessage", "Esta cuenta a\xFAn tiene rol de usuario. Ejecuta supabase/crear_admin.sql en el SQL Editor de Supabase y recarga la aplicaci\xF3n.", true);
+        }
       }
     } catch (err) {
       show("loginView");

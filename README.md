@@ -12,7 +12,7 @@ Aplicación Android (Capacitor) con cuentas de usuario y una cuenta de administr
 
 1. Crea un proyecto Supabase y ejecuta [schema.sql](supabase/schema.sql) en SQL Editor.
 2. Cada persona puede crear su cuenta desde la app con nombre, cédula y contraseña. Internamente recibe el perfil `driver`, sin elegir rol.
-3. En Authentication > Users, crea o confirma la cuenta de administrador con un correo y una contraseña elegida por ti. Después ejecuta [crear_admin.sql](supabase/crear_admin.sql) en SQL Editor; cambia `admin@gmail.com` en el archivo si usaste otro correo. El script inserta o actualiza el perfil como `admin` sin tocar las tablas internas de Supabase Auth. En el campo de acceso «Cédula» de la app puedes escribir ese correo. La contraseña no se puede leer de la base de datos ni está incluida en el repositorio.
+3. La cuenta `administrador@gmail.com` ya debe existir en Authentication > Users. Ejecuta [crear_admin.sql](supabase/crear_admin.sql) en SQL Editor para asignarle el rol `admin` a su perfil. El script no cambia la contraseña ni modifica Supabase Auth. En el campo de acceso «Cédula» de la app puedes escribir ese correo. Recarga la app después de ejecutar el SQL.
 4. Copia **Project URL** y la clave **publishable** en `.env.local`. Nunca uses la clave `service_role` dentro de la app.
 5. Ejecuta `npm install` y `npm run android:apk`. La salida está en `Ruta-Segura.apk`. Para web, ejecuta `npm run build:web` y sirve `dist/` con HTTPS para acceder al GPS.
 
