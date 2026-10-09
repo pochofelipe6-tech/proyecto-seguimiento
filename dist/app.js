@@ -22337,8 +22337,9 @@
     panel.hidden = !panel.hidden;
     $("showVehicleForm").textContent = panel.hidden ? "Agregar veh\xEDculo" : "Cerrar registro de veh\xEDculo";
     if (!panel.hidden) {
-      (_a3 = $("vehicleDriverCedula")).value || (_a3.value = (profile == null ? void 0 : profile.cedula) || "");
-      if ($("vehicleDriverCedula").value) lookupPerson(personFields[1]);
+      const ownField = (profile == null ? void 0 : profile.role) === "assistant" ? personFields[2] : (profile == null ? void 0 : profile.role) === "route_manager" ? personFields[0] : personFields[1];
+      (_a3 = $(ownField.input)).value || (_a3.value = (profile == null ? void 0 : profile.cedula) || "");
+      if ($(ownField.input).value) lookupPerson(ownField);
       await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", "No se pudo cargar la tabla: ".concat(err.message, ". Ejecuta la migraci\xF3n 005."), true));
     }
   });
@@ -22358,7 +22359,8 @@
         p_assistant_cedula: $("vehicleAssistantCedula").value.trim() || null
       }));
       $("driverVehicleForm").reset();
-      $("vehicleDriverCedula").value = profile.cedula || "";
+      const ownField = profile.role === "assistant" ? personFields[2] : profile.role === "route_manager" ? personFields[0] : personFields[1];
+      $(ownField.input).value = profile.cedula || "";
       await loadDriverVehicleTable();
       await loadDriver();
       message("driverVehicleMessage", "Veh\xEDculo registrado y disponible en el selector.");
@@ -22369,9 +22371,9 @@
     }
   });
   async function loadDriver() {
-    const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate"));
+    const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").or("driver_id.eq.".concat(user.id, ",assistant_id.eq.").concat(user.id, ",route_manager_id.eq.").concat(user.id)).eq("enabled", true).order("plate"));
     $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => '<option value="'.concat(v.id, '">').concat(clean(v.plate)).concat(v.label ? " \xB7 ".concat(clean(v.label)) : "", "</option>")).join("") : '<option value="">Sin veh\xEDculo asignado</option>';
-    const trips = failure(await supabase.from("trips").select("*").eq("driver_id", user.id).is("ended_at", null).limit(1));
+    const trips = failure(await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1));
     activeTrip = trips[0] || null;
     renderTrip();
     if (activeTrip) {
@@ -22591,7 +22593,8 @@
         await refreshAdmin();
         if (channel) supabase.removeChannel(channel);
         channel = supabase.channel("control-rutas").on("postgres_changes", { event: "*", schema: "public", table: "trips" }, scheduleRefresh).on("postgres_changes", { event: "*", schema: "public", table: "speed_alerts" }, scheduleRefresh).subscribe();
-      } else if (profile.role === "driver") {
+      } else if (["driver", "assistant", "route_manager"].includes(profile.role)) {
+        $("driverView").querySelector(".eyebrow").textContent = "PANEL DE ".concat(roleNames[profile.role].toUpperCase());
         show("driverView");
         await loadDriver();
         if (["assistant", "route_manager"].includes((_a3 = user.user_metadata) == null ? void 0 : _a3.role)) {

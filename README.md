@@ -28,6 +28,8 @@ El conductor también puede pulsar **Agregar vehículo** junto al selector. El f
 
 Si el registro sigue dejando todos los perfiles como `driver`, el proyecto conserva el trigger anterior. Ejecuta [006_reparar_roles_registro.sql](supabase/migrations/006_reparar_roles_registro.sql) en SQL Editor. Esta migración añade la cédula si faltaba, actualiza el trigger y recupera los roles auxiliar o responsable de cuentas que enviaron ese rol en sus metadatos de Auth. No modifica administradores ni conductores con ruta activa. Una cuenta registrada con una versión antigua de la APK que no enviaba rol debe corregirse manualmente desde el panel administrador.
 
+Conductores, auxiliares y responsables de ruta entran ahora al panel **Mi recorrido**. Cualquiera de ellos puede registrar un vehículo si su propia cédula figura en la asignación. El vehículo debe tener conductor y responsable; el auxiliar es opcional. Solo una de las personas asignadas puede iniciar el seguimiento de ese vehículo a la vez: quien lo inicia envía el GPS y puede finalizarlo; el conductor real sigue identificado por separado en la ruta. Para proyectos existentes, ejecuta [007_seguimiento_personal_ruta.sql](supabase/migrations/007_seguimiento_personal_ruta.sql) después de 005 y 006. Las rutas anteriores conservan a su conductor como responsable del GPS.
+
 Las tablas tienen políticas RLS: el administrador puede ver la flota, y el conductor solo sus rutas y vehículo asignado. Las escrituras de posiciones y alertas se hacen por funciones SQL que validan al conductor autenticado. El mapa se actualiza con Supabase Realtime y tiene un botón de actualización manual.
 
 ## Consideraciones

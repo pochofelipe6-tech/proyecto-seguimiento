@@ -46,6 +46,7 @@ create table if not exists public.trips (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid not null references public.vehicles(id),
   driver_id uuid not null references public.profiles(id),
+  tracker_id uuid not null references public.profiles(id),
   sector text not null check (length(trim(sector)) between 2 and 120),
   zone text not null check (zone in ('urbana','nacional','curvas','escolar')),
   speed_limit integer not null check (speed_limit in (30,35,50,70)),
@@ -61,6 +62,7 @@ create table if not exists public.trips (
 );
 create unique index if not exists one_active_trip_per_vehicle on public.trips(vehicle_id) where ended_at is null;
 create unique index if not exists one_active_trip_per_driver on public.trips(driver_id) where ended_at is null;
+create unique index if not exists one_active_trip_per_tracker on public.trips(tracker_id) where ended_at is null;
 create index if not exists trips_active_seen_idx on public.trips(last_seen_at desc) where ended_at is null;
 
 create table if not exists public.positions (
@@ -103,7 +105,7 @@ grant usage on sequence public.positions_id_seq to authenticated;
 create policy "profiles readable by self or admin" on public.profiles
 for select to authenticated using (id = (select auth.uid()) or (select public.is_admin()));
 create policy "vehicles readable by assigned driver or admin" on public.vehicles
-for select to authenticated using (driver_id = (select auth.uid()) or (select public.is_admin()));
+for select to authenticated using (driver_id = (select auth.uid()) or assistant_id = (select auth.uid()) or route_manager_id = (select auth.uid()) or (select public.is_admin()));
 create policy "admin creates vehicles" on public.vehicles
 for insert to authenticated with check ((select public.is_admin()));
 create policy "admin updates vehicles" on public.vehicles
@@ -111,14 +113,14 @@ for update to authenticated using ((select public.is_admin())) with check ((sele
 create policy "admin deletes vehicles" on public.vehicles
 for delete to authenticated using ((select public.is_admin()));
 create policy "trips readable by driver or admin" on public.trips
-for select to authenticated using (driver_id = (select auth.uid()) or (select public.is_admin()));
+for select to authenticated using (driver_id = (select auth.uid()) or tracker_id = (select auth.uid()) or (select public.is_admin()));
 create policy "positions readable by driver or admin" on public.positions
 for select to authenticated using (exists (
-  select 1 from public.trips t where t.id = trip_id and (t.driver_id = (select auth.uid()) or (select public.is_admin()))
+  select 1 from public.trips t where t.id = trip_id and (t.driver_id = (select auth.uid()) or t.tracker_id = (select auth.uid()) or (select public.is_admin()))
 ));
 create policy "alerts readable by driver or admin" on public.speed_alerts
 for select to authenticated using (exists (
-  select 1 from public.trips t where t.id = trip_id and (t.driver_id = (select auth.uid()) or (select public.is_admin()))
+  select 1 from public.trips t where t.id = trip_id and (t.driver_id = (select auth.uid()) or t.tracker_id = (select auth.uid()) or (select public.is_admin()))
 ));
 
 create or replace function public.lookup_route_person(p_cedula text)
@@ -143,14 +145,16 @@ begin
   if upper(trim(p_plate)) !~ '^[A-Z0-9]{5,8}$' then raise exception 'Placa inválida'; end if;
   select * into v_driver from public.profiles where cedula = p_driver_cedula and role = 'driver';
   if not found then raise exception 'La cédula del conductor no corresponde a un conductor registrado'; end if;
-  if v_driver.id <> (select auth.uid()) and not public.is_admin() then
-    raise exception 'Solo puedes registrar un vehículo para tu propia cédula';
-  end if;
   select * into v_rr from public.profiles where cedula = p_rr_cedula and role = 'route_manager';
   if not found then raise exception 'La cédula del responsable no corresponde a un responsable de ruta'; end if;
   if nullif(trim(coalesce(p_assistant_cedula, '')), '') is not null then
     select * into v_assistant from public.profiles where cedula = p_assistant_cedula and role = 'assistant';
     if not found then raise exception 'La cédula del auxiliar no corresponde a un auxiliar de ruta'; end if;
+  end if;
+  if not public.is_admin() and v_driver.id is distinct from (select auth.uid())
+    and v_rr.id is distinct from (select auth.uid())
+    and v_assistant.id is distinct from (select auth.uid()) then
+    raise exception 'Tu cédula debe figurar como conductor, responsable o auxiliar del vehículo';
   end if;
   insert into public.vehicles (dt_number, plate, driver_id, route_manager_id, assistant_id)
   values (trim(p_dt_number), upper(trim(p_plate)), v_driver.id, v_rr.id, v_assistant.id)
@@ -169,22 +173,28 @@ language sql stable security definer set search_path = '' as $$
   join public.profiles d on d.id = v.driver_id
   left join public.profiles rr on rr.id = v.route_manager_id
   left join public.profiles a on a.id = v.assistant_id
-  where v.driver_id = (select auth.uid())
+  where v.driver_id = (select auth.uid()) or v.route_manager_id = (select auth.uid()) or v.assistant_id = (select auth.uid())
   order by v.created_at desc;
 $$;
 
 create or replace function public.start_trip(p_vehicle_id uuid, p_sector text, p_zone text)
 returns public.trips language plpgsql security definer set search_path = '' as $$
-declare v_trip public.trips; v_limit integer;
+declare v_trip public.trips; v_vehicle public.vehicles; v_limit integer; v_role text;
 begin
   if (select auth.uid()) is null then raise exception 'Inicia sesión'; end if;
   v_limit := case p_zone when 'urbana' then 50 when 'nacional' then 70 when 'curvas' then 35 when 'escolar' then 30 else null end;
   if v_limit is null or length(trim(p_sector)) < 2 then raise exception 'Zona o sector inválido'; end if;
-  if not exists(select 1 from public.vehicles where id = p_vehicle_id and driver_id = (select auth.uid()) and enabled) then
+  select * into v_vehicle from public.vehicles where id = p_vehicle_id and enabled;
+  select role into v_role from public.profiles where id = (select auth.uid());
+  if v_vehicle.id is null or v_role is null or not coalesce((
+    (v_role = 'driver' and v_vehicle.driver_id = (select auth.uid())) or
+    (v_role = 'assistant' and v_vehicle.assistant_id = (select auth.uid())) or
+    (v_role = 'route_manager' and v_vehicle.route_manager_id = (select auth.uid()))
+  ), false) then
     raise exception 'Vehículo no asignado';
   end if;
-  insert into public.trips(vehicle_id, driver_id, sector, zone, speed_limit)
-  values(p_vehicle_id, (select auth.uid()), trim(p_sector), p_zone, v_limit)
+  insert into public.trips(vehicle_id, driver_id, tracker_id, sector, zone, speed_limit)
+  values(p_vehicle_id, v_vehicle.driver_id, (select auth.uid()), trim(p_sector), p_zone, v_limit)
   returning * into v_trip;
   return v_trip;
 end;
@@ -199,7 +209,7 @@ language plpgsql security definer set search_path = '' as $$
 declare v_trip public.trips; v_alert_id uuid; v_speed numeric(6,1); v_segment numeric;
 begin
   select * into v_trip from public.trips
-  where id = p_trip_id and driver_id = (select auth.uid()) and ended_at is null
+  where id = p_trip_id and tracker_id = (select auth.uid()) and ended_at is null
   for update;
   if not found then raise exception 'Ruta no activa'; end if;
   if p_lat not between -90 and 90 or p_lng not between -180 and 180 or p_speed not between 0 and 250 then
@@ -238,7 +248,7 @@ create or replace function public.finish_trip(p_trip_id uuid)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
   update public.trips set ended_at = now(), breach_open = false
-  where id = p_trip_id and driver_id = (select auth.uid()) and ended_at is null;
+  where id = p_trip_id and tracker_id = (select auth.uid()) and ended_at is null;
   if not found then raise exception 'Ruta no activa'; end if;
 end;
 $$;

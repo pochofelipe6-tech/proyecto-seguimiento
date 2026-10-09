@@ -166,8 +166,9 @@ $("showVehicleForm").addEventListener("click", async () => {
   panel.hidden = !panel.hidden;
   $("showVehicleForm").textContent = panel.hidden ? "Agregar vehículo" : "Cerrar registro de vehículo";
   if (!panel.hidden) {
-    $("vehicleDriverCedula").value ||= profile?.cedula || "";
-    if ($("vehicleDriverCedula").value) lookupPerson(personFields[1]);
+    const ownField = profile?.role === "assistant" ? personFields[2] : profile?.role === "route_manager" ? personFields[0] : personFields[1];
+    $(ownField.input).value ||= profile?.cedula || "";
+    if ($(ownField.input).value) lookupPerson(ownField);
     await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", `No se pudo cargar la tabla: ${err.message}. Ejecuta la migración 005.`, true));
   }
 });
@@ -185,7 +186,8 @@ $("driverVehicleForm").addEventListener("submit", async (event) => {
       p_assistant_cedula: $("vehicleAssistantCedula").value.trim() || null,
     }));
     $("driverVehicleForm").reset();
-    $("vehicleDriverCedula").value = profile.cedula || "";
+    const ownField = profile.role === "assistant" ? personFields[2] : profile.role === "route_manager" ? personFields[0] : personFields[1];
+    $(ownField.input).value = profile.cedula || "";
     await loadDriverVehicleTable();
     await loadDriver();
     message("driverVehicleMessage", "Vehículo registrado y disponible en el selector.");
@@ -193,9 +195,9 @@ $("driverVehicleForm").addEventListener("submit", async (event) => {
   finally { button.disabled = false; }
 });
 async function loadDriver() {
-  const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate"));
+  const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").or(`driver_id.eq.${user.id},assistant_id.eq.${user.id},route_manager_id.eq.${user.id}`).eq("enabled", true).order("plate"));
   $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => `<option value="${v.id}">${clean(v.plate)}${v.label ? ` · ${clean(v.label)}` : ""}</option>`).join("") : '<option value="">Sin vehículo asignado</option>';
-  const trips = failure(await supabase.from("trips").select("*").eq("driver_id", user.id).is("ended_at", null).limit(1));
+  const trips = failure(await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1));
   activeTrip = trips[0] || null; renderTrip();
   if (activeTrip) { $("driverVehicle").value = activeTrip.vehicle_id; await startTracking().catch(() => {}); }
 }
@@ -359,7 +361,8 @@ async function loadSession() {
       show("adminView"); ensureMap(); await refreshAdmin();
       if (channel) supabase.removeChannel(channel);
       channel = supabase.channel("control-rutas").on("postgres_changes", { event: "*", schema: "public", table: "trips" }, scheduleRefresh).on("postgres_changes", { event: "*", schema: "public", table: "speed_alerts" }, scheduleRefresh).subscribe();
-    } else if (profile.role === "driver") {
+    } else if (["driver", "assistant", "route_manager"].includes(profile.role)) {
+      $("driverView").querySelector(".eyebrow").textContent = `PANEL DE ${roleNames[profile.role].toUpperCase()}`;
       show("driverView"); await loadDriver();
       if (["assistant", "route_manager"].includes(user.user_metadata?.role)) {
         message("driverMessage", "Tu registro solicitó otro rol, pero la base de datos guardó Conductor. Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor y vuelve a ingresar.", true);
