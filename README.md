@@ -26,6 +26,8 @@ El administrador puede dar de alta una placa y asignarla a una cuenta de conduct
 
 El conductor también puede pulsar **Agregar vehículo** junto al selector. El formulario solicita número de DT, placa, cédula del responsable de ruta y cédula del conductor; la cédula del auxiliar es opcional. Al escribir cada cédula se consulta el nombre en `profiles` y se comprueba el rol. El conductor solo puede crear un vehículo para su propia cédula; la base de datos vuelve a verificar todas las asignaciones al guardar. La tabla del formulario muestra los vehículos del conductor con nombres y cédulas. En proyectos existentes, ejecuta [005_vehiculos_ruta.sql](supabase/migrations/005_vehiculos_ruta.sql) después de las migraciones anteriores.
 
+Si el registro sigue dejando todos los perfiles como `driver`, el proyecto conserva el trigger anterior. Ejecuta [006_reparar_roles_registro.sql](supabase/migrations/006_reparar_roles_registro.sql) en SQL Editor. Esta migración añade la cédula si faltaba, actualiza el trigger y recupera los roles auxiliar o responsable de cuentas que enviaron ese rol en sus metadatos de Auth. No modifica administradores ni conductores con ruta activa. Una cuenta registrada con una versión antigua de la APK que no enviaba rol debe corregirse manualmente desde el panel administrador.
+
 Las tablas tienen políticas RLS: el administrador puede ver la flota, y el conductor solo sus rutas y vehículo asignado. Las escrituras de posiciones y alertas se hacen por funciones SQL que validan al conductor autenticado. El mapa se actualiza con Supabase Realtime y tiene un botón de actualización manual.
 
 ## Consideraciones

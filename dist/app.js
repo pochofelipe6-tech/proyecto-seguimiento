@@ -22575,6 +22575,7 @@
     }
   });
   async function loadSession() {
+    var _a3;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       show("loginView");
@@ -22593,6 +22594,9 @@
       } else if (profile.role === "driver") {
         show("driverView");
         await loadDriver();
+        if (["assistant", "route_manager"].includes((_a3 = user.user_metadata) == null ? void 0 : _a3.role)) {
+          message("driverMessage", "Tu registro solicit\xF3 otro rol, pero la base de datos guard\xF3 Conductor. Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor y vuelve a ingresar.", true);
+        }
       } else {
         $("staffTitle").textContent = roleNames[profile.role] || "Personal de ruta";
         show("staffView");
@@ -22643,7 +22647,11 @@
       if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("Esa c\xE9dula ya tiene una cuenta.");
       $("signupForm").reset();
       if (data.session) {
-        await loadSession();
+        const saved = failure(await supabase.from("profiles").select("role").eq("id", data.user.id).single());
+        if (saved.role !== role) {
+          await supabase.auth.signOut();
+          message("signupMessage", "La cuenta se cre\xF3, pero Supabase guard\xF3 el rol ".concat(roleNames[saved.role] || saved.role, " en lugar de ").concat(roleNames[role], ". Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor; despu\xE9s podr\xE1s ingresar."), true);
+        } else await loadSession();
       } else message("signupMessage", "Cuenta creada, pero Supabase exige confirmaci\xF3n de correo. Pide al administrador que desactive Confirm Email.", true);
     } catch (err) {
       message("signupMessage", "No se pudo registrar: ".concat(err.message), true);

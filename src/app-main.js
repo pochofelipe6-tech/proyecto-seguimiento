@@ -359,7 +359,12 @@ async function loadSession() {
       show("adminView"); ensureMap(); await refreshAdmin();
       if (channel) supabase.removeChannel(channel);
       channel = supabase.channel("control-rutas").on("postgres_changes", { event: "*", schema: "public", table: "trips" }, scheduleRefresh).on("postgres_changes", { event: "*", schema: "public", table: "speed_alerts" }, scheduleRefresh).subscribe();
-    } else if (profile.role === "driver") { show("driverView"); await loadDriver(); }
+    } else if (profile.role === "driver") {
+      show("driverView"); await loadDriver();
+      if (["assistant", "route_manager"].includes(user.user_metadata?.role)) {
+        message("driverMessage", "Tu registro solicitó otro rol, pero la base de datos guardó Conductor. Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor y vuelve a ingresar.", true);
+      }
+    }
     else { $("staffTitle").textContent = roleNames[profile.role] || "Personal de ruta"; show("staffView"); }
   } catch (err) { show("loginView"); message("loginError", `No se pudo cargar el perfil: ${err.message}`, true); }
 }
@@ -394,7 +399,13 @@ $("signupForm").addEventListener("submit", async (event) => {
     if (error) throw error;
     if (!data.user || data.user.identities?.length === 0) throw new Error("Esa cédula ya tiene una cuenta.");
     $("signupForm").reset();
-    if (data.session) { await loadSession(); }
+    if (data.session) {
+      const saved = failure(await supabase.from("profiles").select("role").eq("id", data.user.id).single());
+      if (saved.role !== role) {
+        await supabase.auth.signOut();
+        message("signupMessage", `La cuenta se creó, pero Supabase guardó el rol ${roleNames[saved.role] || saved.role} en lugar de ${roleNames[role]}. Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor; después podrás ingresar.`, true);
+      } else await loadSession();
+    }
     else message("signupMessage", "Cuenta creada, pero Supabase exige confirmación de correo. Pide al administrador que desactive Confirm Email.", true);
   } catch (err) { message("signupMessage", `No se pudo registrar: ${err.message}`, true); }
   finally { button.disabled = false; }
