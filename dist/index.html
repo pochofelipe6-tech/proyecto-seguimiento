@@ -1,93 +1,10 @@
 <!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#101c25" />
-    <meta name="description" content="Monitor de velocidad y registro de excesos por conductor, placa, sector y zona." />
-    <title>Ruta Segura · Monitor SST</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <a class="brand" href="#" aria-label="Ruta Segura, inicio">
-        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4.7 6v5.3c0 4.7 3 8.3 7.3 9.7 4.3-1.4 7.3-5 7.3-9.7V6L12 3Z"/><path d="m8.6 12.1 2.1 2.1 4.7-5"/></svg></span>
-        <span>Ruta <b>Segura</b></span>
-      </a>
-      <div class="top-actions">
-        <span class="system-state" id="systemState"><i></i> Sistema listo</span>
-        <button class="outline-button" id="exportButton" type="button" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>Exportar</button>
-      </div>
-    </header>
-
-    <main class="page-shell">
-      <section class="intro">
-        <div><span class="eyebrow">CONTROL PREVENTIVO SST</span><h1>Monitoreo de<br /><em>velocidad en ruta.</em></h1><p>Activa el GPS, recibe alertas al instante y conserva un registro de cada exceso por placa, conductor, zona y sector.</p></div>
-        <div class="live-pill"><span id="livePulse"></span><b id="liveLabel">Sin monitoreo</b></div>
-      </section>
-
-      <section class="monitor-grid">
-        <article class="setup-card panel">
-          <div class="section-title"><div><span class="section-kicker">CONFIGURACIÓN</span><h2>Datos del recorrido</h2></div><span class="step">01</span></div>
-          <form id="monitorForm" novalidate>
-            <div class="form-row">
-              <label class="field"><span>Conductor *</span><input id="driver" type="text" placeholder="Nombre completo" maxlength="60" autocomplete="name" required /></label>
-              <label class="field"><span>Placa *</span><input id="plate" type="text" placeholder="ABC 123" maxlength="8" autocapitalize="characters" required /></label>
-            </div>
-            <label class="field"><span>Sector o tramo *</span><input id="sector" type="text" placeholder="Ej. Barrio San José / Km 18" maxlength="90" required /></label>
-            <fieldset>
-              <legend>Zona y límite preventivo SST *</legend>
-              <div class="zone-options" id="zoneOptions">
-                <label class="zone-option"><input type="radio" name="zone" value="urbana" checked /><span class="zone-emoji">🏙️</span><span><b>Zona urbana</b><small>Máximo 50 km/h</small></span><strong>50</strong></label>
-                <label class="zone-option"><input type="radio" name="zone" value="nacional" /><span class="zone-emoji">🛣️</span><span><b>Vía nacional</b><small>Máximo 70 km/h</small></span><strong>70</strong></label>
-                <label class="zone-option"><input type="radio" name="zone" value="curvas" /><span class="zone-emoji">🌀</span><span><b>Curvas</b><small>Máximo 35 km/h</small></span><strong>35</strong></label>
-                <label class="zone-option"><input type="radio" name="zone" value="escolar" /><span class="zone-emoji">🏫</span><span><b>Escolar / residencial</b><small>Máximo 30 km/h</small></span><strong>30</strong></label>
-              </div>
-            </fieldset>
-            <p class="form-message" id="formMessage" role="alert"></p>
-            <button class="start-button" id="startButton" type="submit"><span class="button-icon">▶</span><span>Iniciar monitoreo</span></button>
-            <button class="test-button" id="testAlertButton" type="button">🔊 Probar sonido de alerta</button>
-            <button class="test-button" id="simulateEventButton" type="button" hidden>⚠ Simular exceso de prueba</button>
-          </form>
-        </article>
-
-        <article class="speed-card panel" id="speedCard">
-          <div class="section-title dark-title"><div><span class="section-kicker">VELOCIDAD ACTUAL</span><h2 id="activeZone">Zona urbana</h2></div><span class="gps-state" id="gpsState">GPS inactivo</span></div>
-          <div class="speed-body">
-            <div class="speedometer" id="speedometer" style="--speed-angle: -130deg"><div class="speed-arc"></div><div class="needle"></div><div class="needle-center"></div><div class="speed-value"><strong id="currentSpeed">0</strong><span>km/h</span></div></div>
-            <div class="limit-box"><span>Límite activo</span><strong id="activeLimit">50</strong><small>km/h</small></div>
-            <div class="status-banner" id="statusBanner"><span>✓</span><div><b>Velocidad segura</b><small>Estás dentro del límite permitido</small></div></div>
-            <div class="live-details"><div><span>Conductor</span><b id="liveDriver">—</b></div><div><span>Placa</span><b id="livePlate">—</b></div><div><span>Sector</span><b id="liveSector">—</b></div></div>
-          </div>
-        </article>
-      </section>
-
-      <section class="stats" aria-label="Resumen de eventos">
-        <article class="stat primary-stat"><span>Total de excesos</span><strong id="eventCount">0</strong><small>eventos registrados</small></article>
-        <article class="stat"><span>Placas involucradas</span><strong id="plateCount">0</strong><small>vehículos</small></article>
-        <article class="stat"><span>Mayor velocidad</span><strong><b id="maxSpeed">0</b> <small>km/h</small></strong><small id="maxSpeedMeta">Sin registros</small></article>
-        <article class="stat"><span>Zona más frecuente</span><strong class="text-stat" id="topZone">—</strong><small id="topZoneCount">Sin registros</small></article>
-      </section>
-
-      <section class="records panel">
-        <div class="records-head">
-          <div><span class="section-kicker">TRAZABILIDAD</span><h2>Eventos de exceso de velocidad</h2></div>
-          <div class="filters">
-            <label class="search-box"><span class="sr-only">Buscar por placa, conductor o sector</span><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="searchInput" type="search" placeholder="Placa, conductor o sector..." /></label>
-            <label class="select-box"><span class="sr-only">Filtrar por zona</span><select id="zoneFilter"><option value="">Todas las zonas</option><option value="urbana">Zona urbana</option><option value="nacional">Vía nacional</option><option value="curvas">Curvas</option><option value="escolar">Escolar / residencial</option></select></label>
-          </div>
-        </div>
-        <div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Conductor / placa</th><th>Sector</th><th>Zona</th><th>Límite</th><th>Velocidad</th><th>Exceso</th><th></th></tr></thead><tbody id="eventsTable"></tbody></table></div>
-        <div class="empty-state" id="emptyState"><div>✓</div><h3>Sin excesos registrados</h3><p>Los eventos aparecerán aquí cuando una velocidad supere el límite activo.</p></div>
-      </section>
-      <section class="safety-note"><span>i</span><p><b>Uso preventivo:</b> la precisión depende del GPS del dispositivo. Mantén esta pantalla abierta durante el recorrido y no manipules el teléfono mientras conduces.</p></section>
-    </main>
-
-    <div class="overspeed-overlay" id="overspeedOverlay" role="alert" aria-live="assertive"><span class="warning-icon">!</span><div><b>REDUCE LA VELOCIDAD</b><small id="warningText">Has superado el límite permitido</small></div></div>
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js"></script>
-  </body>
-</html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101c25"><title>Ruta Segura SST</title><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./app.css"></head>
+<body>
+<header><div class="brand">◈ Ruta <span>Segura</span><small>SST</small></div><div id="sessionBar" hidden><span id="userName"></span><button id="logoutButton" class="ghost">Salir</button></div></header>
+<main>
+<section id="setupView" class="panel narrow" hidden><div class="eyebrow">CONFIGURACIÓN PENDIENTE</div><h1>Conecta Supabase</h1><p>Para activar las rutas en vivo, agrega la URL y la clave pública (anon/publishable) en <code>src/supabase-config.js</code>, ejecuta <code>supabase/schema.sql</code> en tu proyecto y vuelve a generar el APK.</p><p>La clave <code>service_role</code> nunca debe incluirse en la aplicación.</p></section>
+<section id="loginView" class="panel narrow" hidden><div class="eyebrow">ACCESO SEGURO</div><h1>Entra a Ruta Segura</h1><p>Conductores y administradores ingresan con su cuenta asignada.</p><form id="loginForm"><label>Correo<input id="email" type="email" autocomplete="username" required></label><label>Contraseña<input id="password" type="password" autocomplete="current-password" required></label><button type="submit">Ingresar</button><p id="loginError" class="error" role="alert"></p></form></section>
+<section id="driverView" hidden><div class="page-heading"><div><div class="eyebrow">PANEL DEL CONDUCTOR</div><h1>Mi recorrido</h1><p>Activa tu ruta y permite la ubicación para compartir tu posición con administración.</p></div><span id="driverStatus" class="pill">Sin ruta activa</span></div><div class="driver-grid"><article class="panel"><h2>Datos de la ruta</h2><form id="tripForm"><label>Vehículo asignado<select id="driverVehicle" required></select></label><label>Sector o tramo<input id="sector" maxlength="120" placeholder="Ej. Barrio San José / Km 18" required></label><fieldset><legend>Zona y límite preventivo SST</legend><div class="zones"><label><input type="radio" name="zone" value="urbana" checked> 🏙️ Urbana <b>50 km/h</b></label><label><input type="radio" name="zone" value="nacional"> 🛣️ Vía nacional <b>70 km/h</b></label><label><input type="radio" name="zone" value="curvas"> 🌀 Curvas <b>35 km/h</b></label><label><input type="radio" name="zone" value="escolar"> 🏫 Escolar / residencial <b>30 km/h</b></label></div></fieldset><button id="startButton" type="submit">Iniciar ruta y compartir ubicación</button><button id="stopButton" type="button" class="danger" hidden>Finalizar ruta</button><p id="driverMessage" class="message" role="status"></p></form></article><article class="panel live-panel"><div class="eyebrow">GPS EN VIVO</div><div class="speed"><strong id="speedValue">0</strong><span>km/h</span></div><div class="limit">Límite: <b id="limitValue">50</b> km/h</div><div class="distance">Recorrido: <b id="distanceValue">0,00</b> km</div><div id="speedState" class="safe">Esperando ruta</div><p id="gpsInfo">La ubicación se comparte mientras la app permanece abierta y la ruta está activa.</p><div id="alertBanner" class="alert-banner" hidden>⚠ Reduce la velocidad</div></article></div></section>
+<section id="adminView" hidden><div class="page-heading"><div><div class="eyebrow">CENTRO DE CONTROL SST</div><h1>Vehículos en ruta</h1><p>Posición, recorrido y excesos de velocidad en un solo lugar.</p></div><button id="refreshButton" class="secondary">Actualizar</button></div><div class="stats"><div class="panel"><small>EN RUTA</small><strong id="activeCount">0</strong></div><div class="panel"><small>CON ALERTAS</small><strong id="alertCount">0</strong></div><div class="panel"><small>ÚLTIMA ACTUALIZACIÓN</small><strong id="updateTime">—</strong></div></div><div class="admin-grid"><article class="panel map-panel"><div class="panel-heading"><h2>Mapa de vehículos</h2><span>● En vivo</span></div><div id="map"></div><div id="mapDetail" class="map-detail">Selecciona un vehículo para ver su ruta.</div></article><article class="panel assign-panel"><h2>Agregar vehículo</h2><p>Asigna una placa al conductor que usará el GPS.</p><form id="vehicleForm"><label>Placa<input id="vehiclePlate" maxlength="8" placeholder="ABC123" required></label><label>Conductor<select id="vehicleDriver" required></select></label><label>Descripción (opcional)<input id="vehicleLabel" maxlength="60" placeholder="Camioneta 1"></label><button type="submit">Guardar vehículo</button><p id="vehicleMessage" class="message" role="status"></p></form></article></div><article class="panel table-panel"><div class="panel-heading"><h2>Tabla de vehículos en ruta</h2><span id="tableSummary"></span></div><div class="table-scroll"><table><thead><tr><th>Placa</th><th>Conductor</th><th>Sector / zona</th><th>Velocidad</th><th>Última ubicación</th><th>Alerta</th></tr></thead><tbody id="tripRows"></tbody></table></div></article><article class="panel table-panel"><div class="panel-heading"><h2>Historial de excesos</h2><span>Últimos 50 eventos</span></div><div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Placa</th><th>Conductor</th><th>Sector / zona</th><th>Máxima</th><th>Límite</th></tr></thead><tbody id="alertRows"></tbody></table></div></article><p id="adminMessage" class="message" role="status"></p></section>
+</main><script src="./app.js"></script></body></html>

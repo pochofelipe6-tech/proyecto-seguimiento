@@ -1,1 +1,8 @@
 *.tar.gz
+node_modules/
+.android-tools/
+.jdk/
+.tooling-downloads/
+android/.gradle/
+android/local.properties
+android/app/build/

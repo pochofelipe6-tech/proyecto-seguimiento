@@ -1,0 +1,9 @@
+{
+  "appId": "com.rutasegura.sst",
+  "appName": "Ruta Segura",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#101c25"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "ruta-segura-sst",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:web": "esbuild src/app-entry.js --bundle --outfile=dist/app.js --format=iife --platform=browser --target=chrome60 --loader:.png=dataurl",
+    "android:sync": "npm run build:web && cap sync android",
+    "android:apk": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-apk.ps1"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.9",
+    "@capacitor/core": "7.6.9",
+    "@capacitor/geolocation": "7.1.8",
+    "@capacitor/haptics": "7.0.5",
+    "@capacitor/local-notifications": "7.0.7",
+    "@supabase/supabase-js": "^2.90.1",
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.6.9",
+    "esbuild": "0.25.11"
+  }
+}

@@ -1,0 +1,214 @@
+import { createClient } from "@supabase/supabase-js";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase-config.js";
+
+const $ = (id) => document.getElementById(id);
+const limits = { urbana: 50, nacional: 70, curvas: 35, escolar: 30 };
+const zoneNames = { urbana: "Urbana", nacional: "Vía nacional", curvas: "Curvas", escolar: "Escolar / residencial" };
+const native = window.RutaSeguraNative;
+const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let user, profile, activeTrip, watchId, watchKind, map, mapLayer, routeLayer, channel;
+let lastSent = 0, lastAlarm = 0, refreshTimer, audioContext;
+let adminTrips = [], adminVehicles = [], adminProfiles = [], adminAlerts = [];
+
+function show(view) {
+  for (const id of ["setupView", "loginView", "driverView", "adminView"]) $(id).hidden = id !== view;
+  $("sessionBar").hidden = view === "loginView" || view === "setupView";
+}
+function message(id, text, error = false) { $(id).textContent = text; $(id).classList.toggle("error", error); }
+function clean(value) { return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+function date(value) { return value ? new Date(value).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" }) : "—"; }
+function failure(result) { if (result.error) throw result.error; return result.data; }
+function stopTracking() {
+  if (watchId != null) {
+    if (watchKind === "native") native.clearWatch(watchId).catch(() => {});
+    else navigator.geolocation.clearWatch(watchId);
+  }
+  watchId = null;
+}
+function beep() {
+  try {
+    audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === "suspended") audioContext.resume();
+    const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
+    oscillator.type = "square"; oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.13, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.35);
+    oscillator.connect(gain).connect(audioContext.destination);
+    oscillator.start(); oscillator.stop(audioContext.currentTime + 0.35);
+  } catch (_) {}
+}
+async function alarm(speed, limit) {
+  if (Date.now() - lastAlarm < 10000) return;
+  lastAlarm = Date.now(); beep();
+  if (native.isNative) { native.vibrate().catch(() => {}); native.notify(speed, limit).catch(() => {}); }
+  else if ("Notification" in window && Notification.permission === "granted") new Notification("Reduce la velocidad", { body: `Vas a ${Math.round(speed)} km/h. Límite: ${limit} km/h.` });
+}
+function updateSpeed(speed, limit) {
+  $("speedValue").textContent = Math.round(speed);
+  $("limitValue").textContent = limit;
+  const exceeded = speed > limit;
+  $("speedState").classList.toggle("over", exceeded);
+  $("speedState").textContent = exceeded ? "Exceso de velocidad" : "Dentro del límite";
+  $("alertBanner").hidden = !exceeded;
+  if (exceeded) alarm(speed, limit);
+}
+async function onPosition(position, error) {
+  if (error) { message("driverMessage", `GPS: ${error.message || error}`, true); return; }
+  if (!position?.coords || !activeTrip) return;
+  const { latitude, longitude, speed, accuracy } = position.coords;
+  // Geolocation.speed se entrega en m/s; sin lectura de velocidad no se inventa un exceso.
+  const kmh = speed == null || speed < 0 ? 0 : Math.min(250, speed * 3.6);
+  updateSpeed(kmh, activeTrip.speed_limit);
+  $("gpsInfo").textContent = `${latitude.toFixed(5)}, ${longitude.toFixed(5)} · precisión ${Math.round(accuracy || 0)} m · ${new Date().toLocaleTimeString("es-CO")}`;
+  if (Date.now() - lastSent < 4000) return;
+  lastSent = Date.now();
+  try {
+    const result = failure(await supabase.rpc("record_position", { p_trip_id: activeTrip.id, p_lat: latitude, p_lng: longitude, p_speed: kmh, p_accuracy: accuracy || null }));
+    if (result?.[0]) $("distanceValue").textContent = Number(result[0].total_km).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    message("driverMessage", "Ubicación enviada al centro de control.");
+  } catch (err) { message("driverMessage", `No se pudo enviar la ubicación: ${err.message}`, true); }
+}
+async function startTracking() {
+  stopTracking(); lastSent = 0;
+  try {
+    if (native.isNative) {
+      const permissions = await native.requestPermissions();
+      if (permissions.location !== "granted") throw new Error("Permite el acceso a la ubicación para iniciar el seguimiento.");
+      watchId = await native.watchPosition({ enableHighAccuracy: true }, onPosition);
+      watchKind = "native";
+    } else {
+      if (!navigator.geolocation) throw new Error("Este dispositivo no ofrece GPS.");
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+      watchId = navigator.geolocation.watchPosition((p) => onPosition(p), (e) => onPosition(null, e), { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+      watchKind = "web";
+    }
+    message("driverMessage", "GPS activado. Mantén la aplicación abierta durante la ruta.");
+  } catch (err) { message("driverMessage", err.message, true); throw err; }
+}
+function renderTrip() {
+  const running = !!activeTrip;
+  $("driverStatus").textContent = running ? "Ruta activa" : "Sin ruta activa";
+  $("driverStatus").classList.toggle("active", running);
+  $("startButton").hidden = running; $("stopButton").hidden = !running;
+  for (const element of $("tripForm").querySelectorAll("input,select")) element.disabled = running;
+  if (running) { $("limitValue").textContent = activeTrip.speed_limit; $("sector").value = activeTrip.sector; $("distanceValue").textContent = Number(activeTrip.distance_km || 0).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  else { $("speedValue").textContent = "0"; $("distanceValue").textContent = "0,00"; $("speedState").textContent = "Esperando ruta"; $("alertBanner").hidden = true; }
+}
+async function loadDriver() {
+  const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate"));
+  $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => `<option value="${v.id}">${clean(v.plate)}${v.label ? ` · ${clean(v.label)}` : ""}</option>`).join("") : '<option value="">Sin vehículo asignado</option>';
+  const trips = failure(await supabase.from("trips").select("*").eq("driver_id", user.id).is("ended_at", null).limit(1));
+  activeTrip = trips[0] || null; renderTrip();
+  if (activeTrip) { $("driverVehicle").value = activeTrip.vehicle_id; await startTracking().catch(() => {}); }
+}
+$("tripForm").addEventListener("submit", async (event) => {
+  event.preventDefault(); if (activeTrip) return;
+  const vehicleId = $("driverVehicle").value, sector = $("sector").value.trim();
+  const zone = document.querySelector('input[name="zone"]:checked').value;
+  if (!vehicleId) return message("driverMessage", "Aún no tienes un vehículo asignado.", true);
+  try {
+    // Solicitar GPS antes de crear la ruta evita una ruta activa sin consentimiento.
+    if (native.isNative) {
+      const p = await native.requestPermissions(); if (p.location !== "granted") throw new Error("Debes permitir la ubicación.");
+    } else await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 20000 }));
+    activeTrip = failure(await supabase.rpc("start_trip", { p_vehicle_id: vehicleId, p_sector: sector, p_zone: zone }));
+    renderTrip(); await startTracking();
+  } catch (err) { message("driverMessage", err.message, true); }
+});
+$("stopButton").addEventListener("click", async () => {
+  if (!activeTrip) return;
+  try { failure(await supabase.rpc("finish_trip", { p_trip_id: activeTrip.id })); stopTracking(); activeTrip = null; renderTrip(); message("driverMessage", "Ruta finalizada."); }
+  catch (err) { message("driverMessage", err.message, true); }
+});
+document.querySelectorAll('input[name="zone"]').forEach((input) => input.addEventListener("change", () => { if (!activeTrip) $("limitValue").textContent = limits[input.value]; }));
+
+function ensureMap() {
+  if (map) return;
+  map = L.map("map").setView([4.57, -74.09], 6);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
+  mapLayer = L.layerGroup().addTo(map); routeLayer = L.layerGroup().addTo(map);
+  setTimeout(() => map.invalidateSize(), 50);
+}
+async function selectTrip(id) {
+  const trip = adminTrips.find((t) => t.id === id); if (!trip) return;
+  const vehicle = adminVehicles.find((v) => v.id === trip.vehicle_id);
+  const points = failure(await supabase.from("positions").select("latitude,longitude,recorded_at").eq("trip_id", id).order("recorded_at", { ascending: true }).limit(2000));
+  routeLayer.clearLayers();
+  const path = points.map((p) => [p.latitude, p.longitude]);
+  if (path.length > 1) { L.polyline(path, { color: "#356eae", weight: 4 }).addTo(routeLayer); map.fitBounds(path, { padding: [35, 35] }); }
+  else if (path.length) map.setView(path[0], 15);
+  $("mapDetail").textContent = `${vehicle?.plate || "Vehículo"} · ${trip.sector} · ${points.length} puntos registrados · última señal ${date(trip.last_seen_at)}`;
+}
+function renderAdmin() {
+  const profiles = Object.fromEntries(adminProfiles.map((p) => [p.id, p]));
+  const vehicles = Object.fromEntries(adminVehicles.map((v) => [v.id, v]));
+  const active = adminTrips.filter((t) => !t.ended_at);
+  $("activeCount").textContent = active.length;
+  $("alertCount").textContent = active.filter((t) => t.has_alert).length;
+  $("updateTime").textContent = new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
+  $("tableSummary").textContent = `${active.length} vehículos`;
+  $("tripRows").innerHTML = active.length ? active.map((t) => `<tr data-trip="${t.id}"><td><b>${clean(vehicles[t.vehicle_id]?.plate || "—")}</b></td><td>${clean(profiles[t.driver_id]?.full_name || "—")}</td><td>${clean(t.sector)}<br><small>${zoneNames[t.zone] || t.zone} · ${t.speed_limit} km/h · ${Number(t.distance_km || 0).toFixed(2)} km</small></td><td>${t.last_speed == null ? "—" : `${Math.round(t.last_speed)} km/h`}</td><td>${date(t.last_seen_at)}</td><td>${t.has_alert ? '<span class="alert-tag">Exceso de velocidad</span>' : ""}</td></tr>`).join("") : '<tr><td colspan="6">No hay vehículos en ruta.</td></tr>';
+  $("tripRows").querySelectorAll("tr[data-trip]").forEach((row) => row.addEventListener("click", () => selectTrip(row.dataset.trip).catch((e) => message("adminMessage", e.message, true))));
+  $("alertRows").innerHTML = adminAlerts.length ? adminAlerts.map((a) => { const t = adminTrips.find((x) => x.id === a.trip_id); return `<tr><td>${date(a.occurred_at)}</td><td>${clean(vehicles[t?.vehicle_id]?.plate || "—")}</td><td>${clean(profiles[t?.driver_id]?.full_name || "—")}</td><td>${clean(a.sector)} / ${zoneNames[a.zone] || clean(a.zone)}</td><td>${Math.round(a.peak_speed_kmh)} km/h</td><td>${a.limit_kmh} km/h</td></tr>`; }).join("") : '<tr><td colspan="6">No se han generado alertas.</td></tr>';
+  mapLayer.clearLayers(); const bounds = [];
+  for (const t of active) if (t.last_lat != null && t.last_lng != null) {
+    const point = [t.last_lat, t.last_lng]; bounds.push(point);
+    const color = t.has_alert ? "#d3453c" : "#558e26";
+    L.circleMarker(point, { radius: 11, color: "#fff", weight: 3, fillColor: color, fillOpacity: 1 }).addTo(mapLayer)
+      .bindPopup(`<b>${clean(vehicles[t.vehicle_id]?.plate || "Vehículo")}</b><br>${clean(t.sector)}<br>${t.last_speed ?? "—"} km/h`)
+      .on("click", () => selectTrip(t.id).catch(() => {}));
+  }
+  if (bounds.length && !routeLayer.getLayers().length) map.fitBounds(bounds, { padding: [45, 45], maxZoom: 14 });
+}
+async function refreshAdmin() {
+  try {
+    const [trips, vehicles, profiles, alerts] = await Promise.all([
+      supabase.from("trips").select("*").order("started_at", { ascending: false }).limit(500),
+      supabase.from("vehicles").select("*"),
+      supabase.from("profiles").select("id,full_name,role").order("full_name"),
+      supabase.from("speed_alerts").select("*").order("occurred_at", { ascending: false }).limit(50),
+    ]);
+    adminTrips = failure(trips); adminVehicles = failure(vehicles); adminProfiles = failure(profiles); adminAlerts = failure(alerts);
+    $("vehicleDriver").innerHTML = '<option value="">Selecciona un conductor</option>' + adminProfiles.filter((p) => p.role === "driver").map((p) => `<option value="${p.id}">${clean(p.full_name || p.id)}</option>`).join("");
+    renderAdmin(); message("adminMessage", "");
+  } catch (err) { message("adminMessage", `Error al actualizar: ${err.message}`, true); }
+}
+function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refreshAdmin, 800); }
+$("refreshButton").addEventListener("click", refreshAdmin);
+$("vehicleForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const plate = $("vehiclePlate").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!/^[A-Z0-9]{5,8}$/.test(plate)) throw new Error("La placa debe tener entre 5 y 8 letras o números.");
+    failure(await supabase.from("vehicles").insert({ plate, label: $("vehicleLabel").value.trim(), driver_id: $("vehicleDriver").value }));
+    $("vehicleForm").reset(); message("vehicleMessage", "Vehículo guardado."); await refreshAdmin();
+  } catch (err) { message("vehicleMessage", err.message, true); }
+});
+
+async function loadSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { show("loginView"); return; }
+  user = session.user;
+  try {
+    profile = failure(await supabase.from("profiles").select("*").eq("id", user.id).single());
+    $("userName").textContent = profile.full_name || user.email;
+    if (profile.role === "admin") {
+      show("adminView"); ensureMap(); await refreshAdmin();
+      if (channel) supabase.removeChannel(channel);
+      channel = supabase.channel("control-rutas").on("postgres_changes", { event: "*", schema: "public", table: "trips" }, scheduleRefresh).on("postgres_changes", { event: "*", schema: "public", table: "speed_alerts" }, scheduleRefresh).subscribe();
+    } else { show("driverView"); await loadDriver(); }
+  } catch (err) { show("loginView"); message("loginError", `No se pudo cargar el perfil: ${err.message}`, true); }
+}
+$("loginForm").addEventListener("submit", async (event) => {
+  event.preventDefault(); message("loginError", "Ingresando...");
+  const { error } = await supabase.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+  if (error) return message("loginError", error.message, true);
+  message("loginError", ""); await loadSession();
+});
+$("logoutButton").addEventListener("click", async () => {
+  stopTracking(); if (channel) await supabase.removeChannel(channel);
+  await supabase.auth.signOut(); activeTrip = null; user = profile = null; show("loginView");
+});
+if (!supabase) show("setupView"); else loadSession();
