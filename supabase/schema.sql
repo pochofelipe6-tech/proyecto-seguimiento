@@ -5,18 +5,16 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null default '',
   cedula text unique check (cedula ~ '^[0-9]{6,15}$'),
-  role text not null default 'driver' check (role in ('driver', 'assistant', 'route_manager', 'admin')),
+  role text not null default 'driver' check (role in ('driver', 'admin')),
   created_at timestamptz not null default now()
 );
 
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  insert into public.profiles (id, full_name, cedula, role)
+  insert into public.profiles (id, full_name, cedula)
   values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', ''),
-    nullif(new.raw_user_meta_data ->> 'cedula', ''),
-    case when new.raw_user_meta_data ->> 'role' in ('driver', 'assistant', 'route_manager')
-      then new.raw_user_meta_data ->> 'role' else 'driver' end);
+    nullif(new.raw_user_meta_data ->> 'cedula', ''));
   return new;
 end;
 $$;
@@ -143,13 +141,13 @@ begin
   if (select auth.uid()) is null then raise exception 'Inicia sesión'; end if;
   if p_dt_number is null or length(trim(p_dt_number)) not between 1 and 40 then raise exception 'Número de DT inválido'; end if;
   if upper(trim(p_plate)) !~ '^[A-Z0-9]{5,8}$' then raise exception 'Placa inválida'; end if;
-  select * into v_driver from public.profiles where cedula = p_driver_cedula and role = 'driver';
-  if not found then raise exception 'La cédula del conductor no corresponde a un conductor registrado'; end if;
-  select * into v_rr from public.profiles where cedula = p_rr_cedula and role = 'route_manager';
-  if not found then raise exception 'La cédula del responsable no corresponde a un responsable de ruta'; end if;
+  select * into v_driver from public.profiles where cedula = p_driver_cedula;
+  if not found then raise exception 'La cédula del conductor no corresponde a un usuario registrado'; end if;
+  select * into v_rr from public.profiles where cedula = p_rr_cedula;
+  if not found then raise exception 'La cédula del responsable no corresponde a un usuario registrado'; end if;
   if nullif(trim(coalesce(p_assistant_cedula, '')), '') is not null then
-    select * into v_assistant from public.profiles where cedula = p_assistant_cedula and role = 'assistant';
-    if not found then raise exception 'La cédula del auxiliar no corresponde a un auxiliar de ruta'; end if;
+    select * into v_assistant from public.profiles where cedula = p_assistant_cedula;
+    if not found then raise exception 'La cédula del auxiliar no corresponde a un usuario registrado'; end if;
   end if;
   if not public.is_admin() and v_driver.id is distinct from (select auth.uid())
     and v_rr.id is distinct from (select auth.uid())
@@ -179,17 +177,16 @@ $$;
 
 create or replace function public.start_trip(p_vehicle_id uuid, p_sector text, p_zone text)
 returns public.trips language plpgsql security definer set search_path = '' as $$
-declare v_trip public.trips; v_vehicle public.vehicles; v_limit integer; v_role text;
+declare v_trip public.trips; v_vehicle public.vehicles; v_limit integer;
 begin
   if (select auth.uid()) is null then raise exception 'Inicia sesión'; end if;
   v_limit := case p_zone when 'urbana' then 50 when 'nacional' then 70 when 'curvas' then 35 when 'escolar' then 30 else null end;
   if v_limit is null or length(trim(p_sector)) < 2 then raise exception 'Zona o sector inválido'; end if;
   select * into v_vehicle from public.vehicles where id = p_vehicle_id and enabled;
-  select role into v_role from public.profiles where id = (select auth.uid());
-  if v_vehicle.id is null or v_role is null or not coalesce((
-    (v_role = 'driver' and v_vehicle.driver_id = (select auth.uid())) or
-    (v_role = 'assistant' and v_vehicle.assistant_id = (select auth.uid())) or
-    (v_role = 'route_manager' and v_vehicle.route_manager_id = (select auth.uid()))
+  if v_vehicle.id is null or not coalesce((
+    v_vehicle.driver_id = (select auth.uid()) or
+    v_vehicle.assistant_id = (select auth.uid()) or
+    v_vehicle.route_manager_id = (select auth.uid())
   ), false) then
     raise exception 'Vehículo no asignado';
   end if;
@@ -257,7 +254,7 @@ create or replace function public.set_user_role(p_user_id uuid, p_role text)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
   if not public.is_admin() then raise exception 'Solo un administrador puede asignar roles'; end if;
-  if p_role not in ('driver', 'assistant', 'route_manager', 'admin') then raise exception 'Rol inválido'; end if;
+  if p_role not in ('driver', 'admin') then raise exception 'Rol inválido'; end if;
   if p_user_id = (select auth.uid()) and p_role <> 'admin' then
     raise exception 'No puedes quitarte tu propio rol de administrador';
   end if;

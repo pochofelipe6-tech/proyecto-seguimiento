@@ -22138,8 +22138,6 @@
   var configuredKey = ((_a2 = window.RutaSeguraConfig) == null ? void 0 : _a2.anonKey) || SUPABASE_ANON_KEY;
   var supabase = configuredUrl && configuredKey ? createClient(configuredUrl, configuredKey) : null;
   var emailForCedula = (cedula) => "cedula-".concat(cedula, "@rutasegura.invalid");
-  var roleNames = { driver: "Conductor", assistant: "Auxiliar de ruta", route_manager: "Responsable de ruta", admin: "Administrador" };
-  var roleOptions = Object.entries(roleNames).map(([value, label]) => '<option value="'.concat(value, '">').concat(label, "</option>")).join("");
   async function requireCedulaOnlyAuth() {
     const response = await fetch("".concat(configuredUrl, "/auth/v1/settings"), { headers: { apikey: configuredKey } });
     if (!response.ok) throw new Error("No se pudo verificar la configuraci\xF3n de registro de Supabase.");
@@ -22159,6 +22157,7 @@
   var channel;
   var lastSent = 0;
   var lastAlarm = 0;
+  var lastAlertRefresh = 0;
   var refreshTimer;
   var audioContext;
   var adminTrips = [];
@@ -22167,7 +22166,7 @@
   var adminAlerts = [];
   var registrationReady = false;
   function show(view) {
-    for (const id of ["setupView", "loginView", "signupView", "driverView", "staffView", "adminView"]) $(id).hidden = id !== view;
+    for (const id of ["setupView", "loginView", "signupView", "driverView", "adminView"]) $(id).hidden = id !== view;
     $("registrationPanel").hidden = view !== "adminView";
     $("sessionBar").hidden = view === "loginView" || view === "signupView" || view === "setupView";
   }
@@ -22243,6 +22242,11 @@
     try {
       const result = failure(await supabase.rpc("record_position", { p_trip_id: activeTrip.id, p_lat: latitude, p_lng: longitude, p_speed: kmh, p_accuracy: accuracy || null }));
       if (result == null ? void 0 : result[0]) $("distanceValue").textContent = Number(result[0].total_km).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (kmh > activeTrip.speed_limit && Date.now() - lastAlertRefresh > 1e4) {
+        lastAlertRefresh = Date.now();
+        loadDriverAlerts().catch(() => {
+        });
+      }
       message("driverMessage", "Ubicaci\xF3n enviada al centro de control.");
     } catch (err) {
       message("driverMessage", "No se pudo enviar la ubicaci\xF3n: ".concat(err.message), true);
@@ -22288,12 +22292,14 @@
       $("alertBanner").hidden = true;
     }
   }
+  $("startButton").textContent = "Iniciar seguimiento";
   $("driverVehicle").closest("label").insertAdjacentHTML("afterend", '<button id="showVehicleForm" type="button" class="secondary vehicle-add-button">Agregar veh\xEDculo</button>');
   $("tripForm").insertAdjacentHTML("afterend", '\n  <section id="driverVehiclePanel" class="vehicle-registration" hidden>\n    <h2>Agregar veh\xEDculo a la ruta</h2>\n    <form id="driverVehicleForm">\n      <div class="vehicle-form-grid">\n        <label>N\xFAmero de DT<input id="vehicleDt" type="text" maxlength="40" required></label>\n        <label>Placa del veh\xEDculo<input id="vehiclePlateNew" type="text" maxlength="8" placeholder="ABC123" required></label>\n        <label>C\xE9dula de responsable de ruta (RR)<input id="vehicleRrCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleRrName" class="person-result" aria-live="polite"></small></label>\n        <label>C\xE9dula de conductor<input id="vehicleDriverCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleDriverName" class="person-result" aria-live="polite"></small></label>\n        <label>C\xE9dula de auxiliar (opcional)<input id="vehicleAssistantCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15"><small id="vehicleAssistantName" class="person-result" aria-live="polite"></small></label>\n      </div>\n      <button type="submit">Guardar veh\xEDculo</button>\n      <p id="driverVehicleMessage" class="message" role="status"></p>\n    </form>\n    <h2>Veh\xEDculos registrados</h2>\n    <div class="table-scroll"><table><thead><tr><th>DT</th><th>Placa</th><th>Responsable de ruta</th><th>Conductor</th><th>Auxiliar</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>\n  </section>');
+  $("driverView").insertAdjacentHTML("beforeend", '<section class="panel table-panel"><div class="panel-heading"><h2>Mis alertas de velocidad</h2><span id="driverAlertCount">0 eventos</span></div><div class="table-scroll"><table><thead><tr><th>Fecha y hora</th><th>Placa</th><th>Sector</th><th>Zona</th><th>Velocidad m\xE1xima</th><th>L\xEDmite</th></tr></thead><tbody id="driverAlertRows"><tr><td colspan="6">A\xFAn no hay alertas.</td></tr></tbody></table></div></section>');
   var personFields = [
-    { input: "vehicleRrCedula", output: "vehicleRrName", role: "route_manager", required: true },
-    { input: "vehicleDriverCedula", output: "vehicleDriverName", role: "driver", required: true },
-    { input: "vehicleAssistantCedula", output: "vehicleAssistantName", role: "assistant", required: false }
+    { input: "vehicleRrCedula", output: "vehicleRrName", required: true },
+    { input: "vehicleDriverCedula", output: "vehicleDriverName", required: true },
+    { input: "vehicleAssistantCedula", output: "vehicleAssistantName", required: false }
   ];
   async function lookupPerson(field) {
     const cedula = $(field.input).value.trim();
@@ -22309,8 +22315,8 @@
       const people = failure(await supabase.rpc("lookup_route_person", { p_cedula: cedula }));
       if ($(field.input).value.trim() !== cedula) return null;
       const person = people == null ? void 0 : people[0];
-      $(field.output).textContent = !person ? "No se encontr\xF3 esa c\xE9dula" : person.person_role !== field.role ? "".concat(person.person_name, " \xB7 rol incorrecto: ").concat(roleNames[person.person_role] || person.person_role) : person.person_name;
-      return (person == null ? void 0 : person.person_role) === field.role ? person : null;
+      $(field.output).textContent = (person == null ? void 0 : person.person_name) || "No se encontr\xF3 esa c\xE9dula";
+      return person || null;
     } catch (err) {
       $(field.output).textContent = "No se pudo consultar la c\xE9dula. Revisa la migraci\xF3n 005.";
       return null;
@@ -22337,9 +22343,8 @@
     panel.hidden = !panel.hidden;
     $("showVehicleForm").textContent = panel.hidden ? "Agregar veh\xEDculo" : "Cerrar registro de veh\xEDculo";
     if (!panel.hidden) {
-      const ownField = (profile == null ? void 0 : profile.role) === "assistant" ? personFields[2] : (profile == null ? void 0 : profile.role) === "route_manager" ? personFields[0] : personFields[1];
-      (_a3 = $(ownField.input)).value || (_a3.value = (profile == null ? void 0 : profile.cedula) || "");
-      if ($(ownField.input).value) lookupPerson(ownField);
+      (_a3 = $("vehicleDriverCedula")).value || (_a3.value = (profile == null ? void 0 : profile.cedula) || "");
+      if ($("vehicleDriverCedula").value) lookupPerson(personFields[1]);
       await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", "No se pudo cargar la tabla: ".concat(err.message, ". Ejecuta la migraci\xF3n 005."), true));
     }
   });
@@ -22359,8 +22364,7 @@
         p_assistant_cedula: $("vehicleAssistantCedula").value.trim() || null
       }));
       $("driverVehicleForm").reset();
-      const ownField = profile.role === "assistant" ? personFields[2] : profile.role === "route_manager" ? personFields[0] : personFields[1];
-      $(ownField.input).value = profile.cedula || "";
+      $("vehicleDriverCedula").value = profile.cedula || "";
       await loadDriverVehicleTable();
       await loadDriver();
       message("driverVehicleMessage", "Veh\xEDculo registrado y disponible en el selector.");
@@ -22376,11 +22380,26 @@
     const trips = failure(await supabase.from("trips").select("*").eq("tracker_id", user.id).is("ended_at", null).limit(1));
     activeTrip = trips[0] || null;
     renderTrip();
+    await loadDriverAlerts().catch((err) => message("driverMessage", "No se pudieron cargar las alertas: ".concat(err.message), true));
     if (activeTrip) {
       $("driverVehicle").value = activeTrip.vehicle_id;
       await startTracking().catch(() => {
       });
     }
+  }
+  async function loadDriverAlerts() {
+    const result = await supabase.from("speed_alerts").select("trip_id,occurred_at,sector,zone,peak_speed_kmh,limit_kmh", { count: "exact" }).order("occurred_at", { ascending: false }).limit(50);
+    const events = failure(result);
+    $("driverAlertCount").textContent = "".concat(result.count || 0, " evento").concat(result.count === 1 ? "" : "s", " \xB7 \xFAltimos 50");
+    if (!events.length) {
+      $("driverAlertRows").innerHTML = '<tr><td colspan="6">A\xFAn no hay alertas.</td></tr>';
+      return;
+    }
+    const trips = failure(await supabase.from("trips").select("id,vehicle_id").in("id", [...new Set(events.map((a) => a.trip_id))]));
+    const tripVehicles = Object.fromEntries(trips.map((t) => [t.id, t.vehicle_id]));
+    const vehicles = failure(await supabase.from("vehicles").select("id,plate").in("id", [...new Set(trips.map((t) => t.vehicle_id))]));
+    const plates = Object.fromEntries(vehicles.map((v) => [v.id, v.plate]));
+    $("driverAlertRows").innerHTML = events.length ? events.map((a) => "<tr><td>".concat(date(a.occurred_at), "</td><td>").concat(clean(plates[tripVehicles[a.trip_id]] || "\u2014"), "</td><td>").concat(clean(a.sector), "</td><td>").concat(clean(zoneNames[a.zone] || a.zone), "</td><td>").concat(Math.round(a.peak_speed_kmh), " km/h</td><td>").concat(a.limit_kmh, " km/h</td></tr>")).join("") : '<tr><td colspan="6">A\xFAn no hay alertas.</td></tr>';
   }
   $("tripForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -22396,6 +22415,7 @@
       activeTrip = failure(await supabase.rpc("start_trip", { p_vehicle_id: vehicleId, p_sector: sector, p_zone: zone }));
       renderTrip();
       await startTracking();
+      await loadDriverAlerts();
     } catch (err) {
       message("driverMessage", err.message, true);
     }
@@ -22407,6 +22427,7 @@
       stopTracking();
       activeTrip = null;
       renderTrip();
+      await loadDriverAlerts();
       message("driverMessage", "Ruta finalizada.");
     } catch (err) {
       message("driverMessage", err.message, true);
@@ -22445,11 +22466,7 @@
     $("alertCount").textContent = active.filter((t) => t.has_alert).length;
     $("updateTime").textContent = (/* @__PURE__ */ new Date()).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
     $("tableSummary").textContent = "".concat(active.length, " veh\xEDculos");
-    $("profileRows").innerHTML = adminProfiles.length ? adminProfiles.map((p) => "<tr><td>".concat(clean(p.full_name || "\u2014"), "</td><td>").concat(clean(p.cedula || "\u2014"), "</td><td>").concat(clean(roleNames[p.role] || p.role), '</td><td><select aria-label="Nuevo rol para ').concat(clean(p.full_name || p.cedula || "usuario"), '" data-role-user="').concat(p.id, '" ').concat(p.id === user.id ? "disabled" : "", ">").concat(roleOptions, '</select><button type="button" data-save-role="').concat(p.id, '" ').concat(p.id === user.id ? "disabled" : "", ">Guardar</button></td></tr>")).join("") : '<tr><td colspan="4">No hay usuarios registrados.</td></tr>';
-    $("profileRows").querySelectorAll("select[data-role-user]").forEach((select) => {
-      var _a4;
-      select.value = ((_a4 = adminProfiles.find((p) => p.id === select.dataset.roleUser)) == null ? void 0 : _a4.role) || "driver";
-    });
+    $("profileRows").innerHTML = adminProfiles.length ? adminProfiles.map((p) => "<tr><td>".concat(clean(p.full_name || "\u2014"), "</td><td>").concat(clean(p.cedula || "\u2014"), "</td></tr>")).join("") : '<tr><td colspan="2">No hay usuarios registrados.</td></tr>';
     $("tripRows").innerHTML = active.length ? active.map((t) => {
       var _a4, _b2;
       return '<tr data-trip="'.concat(t.id, '"><td><b>').concat(clean(((_a4 = vehicles[t.vehicle_id]) == null ? void 0 : _a4.plate) || "\u2014"), "</b></td><td>").concat(clean(((_b2 = profiles[t.driver_id]) == null ? void 0 : _b2.full_name) || "\u2014"), "</td><td>").concat(clean(t.sector), "<br><small>").concat(zoneNames[t.zone] || t.zone, " \xB7 ").concat(t.speed_limit, " km/h \xB7 ").concat(Number(t.distance_km || 0).toFixed(2), " km</small></td><td>").concat(t.last_speed == null ? "\u2014" : "".concat(Math.round(t.last_speed), " km/h"), "</td><td>").concat(date(t.last_seen_at), "</td><td>").concat(t.has_alert ? '<span class="alert-tag">Exceso de velocidad</span>' : "", "</td></tr>");
@@ -22505,26 +22522,7 @@
     refreshTimer = setTimeout(refreshAdmin, 800);
   }
   $("refreshButton").addEventListener("click", refreshAdmin);
-  $("registerRole").innerHTML = roleOptions;
-  $("registrationPanel").querySelector("thead tr").innerHTML = "<th>Nombre</th><th>C\xE9dula</th><th>Rol actual</th><th>Cambiar rol</th>";
-  $("profileRows").addEventListener("click", async (event) => {
-    var _a3;
-    const button = event.target.closest("button[data-save-role]");
-    if (!button || (profile == null ? void 0 : profile.role) !== "admin") return;
-    const target = adminProfiles.find((p) => p.id === button.dataset.saveRole);
-    const nextRole = (_a3 = $("profileRows").querySelector('select[data-role-user="'.concat(button.dataset.saveRole, '"]'))) == null ? void 0 : _a3.value;
-    if (!target || !roleNames[nextRole] || target.id === user.id) return;
-    if (target.role === nextRole) return message("registrationMessage", "El usuario ya tiene ese rol.");
-    button.disabled = true;
-    try {
-      failure(await supabase.rpc("set_user_role", { p_user_id: target.id, p_role: nextRole }));
-      await refreshAdmin();
-      message("registrationMessage", "Rol de ".concat(target.full_name || target.cedula, " actualizado a ").concat(roleNames[nextRole], "."));
-    } catch (err) {
-      message("registrationMessage", "No se pudo cambiar el rol: ".concat(err.message, ". Ejecuta la migraci\xF3n 003_roles_ruta.sql si falta."), true);
-      button.disabled = false;
-    }
-  });
+  $("registrationPanel").querySelector("thead tr").innerHTML = "<th>Nombre</th><th>C\xE9dula</th>";
   $("vehicleForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -22548,7 +22546,6 @@
     const cedula = $("registerCedula").value.trim();
     const email = emailForCedula(cedula);
     const password = $("registerPassword").value;
-    const role = $("registerRole").value;
     if (fullName.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
       return message("registrationMessage", "Revisa el nombre, la c\xE9dula y la contrase\xF1a (m\xEDnimo 8 caracteres).", true);
     }
@@ -22566,18 +22563,16 @@
       });
       if (error) throw error;
       if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("Esa c\xE9dula ya tiene una cuenta.");
-      if (role !== "driver") failure(await supabase.rpc("set_user_role", { p_user_id: data.user.id, p_role: role }));
       $("registrationForm").reset();
       await refreshAdmin();
       message("registrationMessage", data.session ? "Usuario registrado. Ya puede ingresar con su c\xE9dula." : "Cuenta creada, pero Supabase exige confirmaci\xF3n de correo. Desactiva Confirm Email para usarla.", !data.session);
     } catch (err) {
-      message("registrationMessage", "No se complet\xF3 el registro: ".concat(err.message, ". Si el usuario se cre\xF3, revisa su rol en la tabla."), true);
+      message("registrationMessage", "No se complet\xF3 el registro: ".concat(err.message, ". Si la cuenta se cre\xF3, revisa la tabla de usuarios."), true);
     } finally {
       button.disabled = false;
     }
   });
   async function loadSession() {
-    var _a3;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       show("loginView");
@@ -22593,16 +22588,10 @@
         await refreshAdmin();
         if (channel) supabase.removeChannel(channel);
         channel = supabase.channel("control-rutas").on("postgres_changes", { event: "*", schema: "public", table: "trips" }, scheduleRefresh).on("postgres_changes", { event: "*", schema: "public", table: "speed_alerts" }, scheduleRefresh).subscribe();
-      } else if (["driver", "assistant", "route_manager"].includes(profile.role)) {
-        $("driverView").querySelector(".eyebrow").textContent = "PANEL DE ".concat(roleNames[profile.role].toUpperCase());
+      } else {
+        $("driverView").querySelector(".eyebrow").textContent = "PANEL DE SEGUIMIENTO";
         show("driverView");
         await loadDriver();
-        if (["assistant", "route_manager"].includes((_a3 = user.user_metadata) == null ? void 0 : _a3.role)) {
-          message("driverMessage", "Tu registro solicit\xF3 otro rol, pero la base de datos guard\xF3 Conductor. Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor y vuelve a ingresar.", true);
-        }
-      } else {
-        $("staffTitle").textContent = roleNames[profile.role] || "Personal de ruta";
-        show("staffView");
       }
     } catch (err) {
       show("loginView");
@@ -22624,7 +22613,6 @@
     show("signupView");
   });
   $("backToLogin").addEventListener("click", () => show("loginView"));
-  $("showSignup").textContent = "Crear cuenta";
   $("signupForm").addEventListener("submit", async (event) => {
     var _a3;
     event.preventDefault();
@@ -22632,8 +22620,7 @@
     const cedula = $("signupCedula").value.trim();
     const email = emailForCedula(cedula);
     const password = $("signupPassword").value;
-    const role = $("signupRole").value;
-    if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8 || !["driver", "assistant", "route_manager"].includes(role)) {
+    if (name.length < 3 || !/^[0-9]{6,15}$/.test(cedula) || password.length < 8) {
       return message("signupMessage", "Revisa el nombre, la c\xE9dula y la contrase\xF1a (m\xEDnimo 8 caracteres).", true);
     }
     const button = $("signupForm").querySelector('button[type="submit"]');
@@ -22644,17 +22631,16 @@
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: name, cedula, role } }
+        options: { data: { full_name: name, cedula } }
       });
       if (error) throw error;
       if (!data.user || ((_a3 = data.user.identities) == null ? void 0 : _a3.length) === 0) throw new Error("Esa c\xE9dula ya tiene una cuenta.");
       $("signupForm").reset();
       if (data.session) {
-        const saved = failure(await supabase.from("profiles").select("role").eq("id", data.user.id).single());
-        if (saved.role !== role) {
-          await supabase.auth.signOut();
-          message("signupMessage", "La cuenta se cre\xF3, pero Supabase guard\xF3 el rol ".concat(roleNames[saved.role] || saved.role, " en lugar de ").concat(roleNames[role], ". Ejecuta supabase/migrations/006_reparar_roles_registro.sql en SQL Editor; despu\xE9s podr\xE1s ingresar."), true);
-        } else await loadSession();
+        await supabase.auth.signOut();
+        $("loginIdentifier").value = cedula;
+        show("loginView");
+        message("loginError", "Usuario creado exitosamente. Ingresa con tu c\xE9dula y contrase\xF1a.");
       } else message("signupMessage", "Cuenta creada, pero Supabase exige confirmaci\xF3n de correo. Pide al administrador que desactive Confirm Email.", true);
     } catch (err) {
       message("signupMessage", "No se pudo registrar: ".concat(err.message), true);
