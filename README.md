@@ -24,6 +24,8 @@ La pantalla de acceso incluye **Crear cuenta de conductor** con nombre, cédula,
 
 El administrador puede dar de alta una placa y asignarla a una cuenta de conductor. El conductor inicia una ruta, acepta el permiso de ubicación y mantiene la app abierta. El GPS envía coordenadas y velocidad aproximadamente cada 4 segundos. El servidor guarda las posiciones en `positions`, el estado y kilometraje acumulado en `trips` y cada episodio de exceso en `speed_alerts`. Una alerta continúa actualizando su velocidad máxima mientras el vehículo siga sobre el límite; al volver al límite y superarlo de nuevo, se crea otro evento. La tabla de rutas deja vacía la celda de alerta si esa ruta no registró excesos.
 
+El conductor también puede pulsar **Agregar vehículo** junto al selector. El formulario solicita número de DT, placa, cédula del responsable de ruta y cédula del conductor; la cédula del auxiliar es opcional. Al escribir cada cédula se consulta el nombre en `profiles` y se comprueba el rol. El conductor solo puede crear un vehículo para su propia cédula; la base de datos vuelve a verificar todas las asignaciones al guardar. La tabla del formulario muestra los vehículos del conductor con nombres y cédulas. En proyectos existentes, ejecuta [005_vehiculos_ruta.sql](supabase/migrations/005_vehiculos_ruta.sql) después de las migraciones anteriores.
+
 Las tablas tienen políticas RLS: el administrador puede ver la flota, y el conductor solo sus rutas y vehículo asignado. Las escrituras de posiciones y alertas se hacen por funciones SQL que validan al conductor autenticado. El mapa se actualiza con Supabase Realtime y tiene un botón de actualización manual.
 
 ## Consideraciones

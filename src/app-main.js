@@ -111,6 +111,87 @@ function renderTrip() {
   if (running) { $("limitValue").textContent = activeTrip.speed_limit; $("sector").value = activeTrip.sector; $("distanceValue").textContent = Number(activeTrip.distance_km || 0).toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   else { $("speedValue").textContent = "0"; $("distanceValue").textContent = "0,00"; $("speedState").textContent = "Esperando ruta"; $("alertBanner").hidden = true; }
 }
+$("driverVehicle").closest("label").insertAdjacentHTML("afterend", '<button id="showVehicleForm" type="button" class="secondary vehicle-add-button">Agregar vehículo</button>');
+$("tripForm").insertAdjacentHTML("afterend", `
+  <section id="driverVehiclePanel" class="vehicle-registration" hidden>
+    <h2>Agregar vehículo a la ruta</h2>
+    <form id="driverVehicleForm">
+      <div class="vehicle-form-grid">
+        <label>Número de DT<input id="vehicleDt" type="text" maxlength="40" required></label>
+        <label>Placa del vehículo<input id="vehiclePlateNew" type="text" maxlength="8" placeholder="ABC123" required></label>
+        <label>Cédula de responsable de ruta (RR)<input id="vehicleRrCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleRrName" class="person-result" aria-live="polite"></small></label>
+        <label>Cédula de conductor<input id="vehicleDriverCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15" required><small id="vehicleDriverName" class="person-result" aria-live="polite"></small></label>
+        <label>Cédula de auxiliar (opcional)<input id="vehicleAssistantCedula" type="text" inputmode="numeric" pattern="[0-9]{6,15}" maxlength="15"><small id="vehicleAssistantName" class="person-result" aria-live="polite"></small></label>
+      </div>
+      <button type="submit">Guardar vehículo</button>
+      <p id="driverVehicleMessage" class="message" role="status"></p>
+    </form>
+    <h2>Vehículos registrados</h2>
+    <div class="table-scroll"><table><thead><tr><th>DT</th><th>Placa</th><th>Responsable de ruta</th><th>Conductor</th><th>Auxiliar</th></tr></thead><tbody id="driverVehicleRows"></tbody></table></div>
+  </section>`);
+const personFields = [
+  { input: "vehicleRrCedula", output: "vehicleRrName", role: "route_manager", required: true },
+  { input: "vehicleDriverCedula", output: "vehicleDriverName", role: "driver", required: true },
+  { input: "vehicleAssistantCedula", output: "vehicleAssistantName", role: "assistant", required: false },
+];
+async function lookupPerson(field) {
+  const cedula = $(field.input).value.trim();
+  if (!cedula && !field.required) { $(field.output).textContent = "Sin auxiliar"; return null; }
+  if (!/^[0-9]{6,15}$/.test(cedula)) { $(field.output).textContent = "Escribe una cédula válida"; return null; }
+  try {
+    const people = failure(await supabase.rpc("lookup_route_person", { p_cedula: cedula }));
+    if ($(field.input).value.trim() !== cedula) return null;
+    const person = people?.[0];
+    $(field.output).textContent = !person ? "No se encontró esa cédula" : person.person_role !== field.role
+      ? `${person.person_name} · rol incorrecto: ${roleNames[person.person_role] || person.person_role}`
+      : person.person_name;
+    return person?.person_role === field.role ? person : null;
+  } catch (err) { $(field.output).textContent = "No se pudo consultar la cédula. Revisa la migración 005."; return null; }
+}
+for (const field of personFields) {
+  let timer;
+  $(field.input).addEventListener("input", () => {
+    clearTimeout(timer);
+    $(field.output).textContent = "Buscando...";
+    timer = setTimeout(() => lookupPerson(field), 300);
+  });
+}
+function formatPerson(name, cedula) { return name ? `${clean(name)}<br><small>${clean(cedula || "")}</small>` : "—"; }
+async function loadDriverVehicleTable() {
+  const rows = failure(await supabase.rpc("list_my_route_vehicles"));
+  $("driverVehicleRows").innerHTML = rows.length ? rows.map((v) => `<tr><td>${clean(v.dt_number || "—")}</td><td>${clean(v.plate)}</td><td>${formatPerson(v.rr_name, v.rr_cedula)}</td><td>${formatPerson(v.driver_name, v.driver_cedula)}</td><td>${formatPerson(v.assistant_name, v.assistant_cedula)}</td></tr>`).join("") : '<tr><td colspan="5">Aún no hay vehículos registrados.</td></tr>';
+}
+$("showVehicleForm").addEventListener("click", async () => {
+  const panel = $("driverVehiclePanel");
+  panel.hidden = !panel.hidden;
+  $("showVehicleForm").textContent = panel.hidden ? "Agregar vehículo" : "Cerrar registro de vehículo";
+  if (!panel.hidden) {
+    $("vehicleDriverCedula").value ||= profile?.cedula || "";
+    if ($("vehicleDriverCedula").value) lookupPerson(personFields[1]);
+    await loadDriverVehicleTable().catch((err) => message("driverVehicleMessage", `No se pudo cargar la tabla: ${err.message}. Ejecuta la migración 005.`, true));
+  }
+});
+$("driverVehicleForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("driverVehicleForm").querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    for (const field of personFields) {
+      if (!await lookupPerson(field) && (field.required || $(field.input).value.trim())) throw new Error(`Revisa la ${field.input === "vehicleRrCedula" ? "cédula del responsable" : field.input === "vehicleDriverCedula" ? "cédula del conductor" : "cédula del auxiliar"}.`);
+    }
+    failure(await supabase.rpc("create_route_vehicle", {
+      p_dt_number: $("vehicleDt").value.trim(), p_plate: $("vehiclePlateNew").value.trim().toUpperCase(),
+      p_rr_cedula: $("vehicleRrCedula").value.trim(), p_driver_cedula: $("vehicleDriverCedula").value.trim(),
+      p_assistant_cedula: $("vehicleAssistantCedula").value.trim() || null,
+    }));
+    $("driverVehicleForm").reset();
+    $("vehicleDriverCedula").value = profile.cedula || "";
+    await loadDriverVehicleTable();
+    await loadDriver();
+    message("driverVehicleMessage", "Vehículo registrado y disponible en el selector.");
+  } catch (err) { message("driverVehicleMessage", `No se pudo guardar: ${err.message}`, true); }
+  finally { button.disabled = false; }
+});
 async function loadDriver() {
   const vehicles = failure(await supabase.from("vehicles").select("id,plate,label").eq("driver_id", user.id).eq("enabled", true).order("plate"));
   $("driverVehicle").innerHTML = vehicles.length ? vehicles.map((v) => `<option value="${v.id}">${clean(v.plate)}${v.label ? ` · ${clean(v.label)}` : ""}</option>`).join("") : '<option value="">Sin vehículo asignado</option>';
